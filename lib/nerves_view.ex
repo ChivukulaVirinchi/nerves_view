@@ -1,18 +1,17 @@
 defmodule NervesView do
   @moduledoc """
-  Documentation for `NervesView`.
+  Public API for the NervesView foundation phase.
   """
 
-  @doc """
-  Hello world.
+  alias NervesView.Camera.Registry
 
-  ## Examples
+  @spec list_cameras() :: [NervesView.Camera.t()]
+  def list_cameras do
+    Registry.list()
+  end
 
-      iex> NervesView.hello()
-      :world
-
-  """
-  def hello do
-    :world
+  @spec register_camera(map()) :: {:ok, NervesView.Camera.t()} | {:error, term()}
+  def register_camera(attrs) when is_map(attrs) do
+    Registry.upsert(attrs)
   end
 end
