@@ -58,6 +58,8 @@ defmodule NervesView.Alerts do
         by_camera: Map.put(state.by_camera, camera_id, timestamp)
       }
 
+      Phoenix.PubSub.broadcast(NervesView.PubSub, "alerts:motion", {:motion_alert, alert})
+
       {:reply, {:ok, alert}, next_state}
     end
   end

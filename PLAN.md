@@ -30,6 +30,7 @@
 - [x] Phase 8 signaling upgrade completed (session lifecycle manager + API signaling endpoints + browser WebRTC hook + tests)
 - [x] Phase 9 host mock pipeline completed (test source generator + pipeline manager + dashboard start + tests)
 - [x] Phase 10 capture abstraction completed (camera source behaviour + type inference + target pipeline descriptor + tests)
+- [x] Phase 11 motion detection upgrade completed (pipeline detector module + pubsub events + dashboard motion indicators + tests)
 
 Commit trail:
 - `76253ee` bootstrap
@@ -47,6 +48,8 @@ Phase 8 commit follows this PLAN update.
 Phase 9 commit follows this PLAN update.
 
 Phase 10 commit follows this PLAN update.
+
+Phase 11 commit follows this PLAN update.
 
 Core phase commit trail complete through phase 6.
 

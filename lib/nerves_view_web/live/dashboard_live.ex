@@ -3,12 +3,23 @@ defmodule NervesViewWeb.DashboardLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(NervesView.PubSub, "alerts:motion")
+    end
+
     Enum.each(NervesView.list_cameras(), &NervesView.start_test_pipeline(&1.id))
 
     {:ok,
      socket
      |> assign(page_title: "Dashboard")
-     |> assign(cameras: NervesView.list_cameras())}
+     |> assign(cameras: NervesView.list_cameras())
+     |> assign(last_motion: %{})}
+  end
+
+  @impl true
+  def handle_info({:motion_alert, alert}, socket) do
+    {:noreply,
+     assign(socket, :last_motion, Map.put(socket.assigns.last_motion, alert.camera_id, alert))}
   end
 
   @impl true
@@ -34,6 +45,9 @@ defmodule NervesViewWeb.DashboardLive do
             ></video>
             <p>ID: {camera.id}</p>
             <p>Status: {camera.status}</p>
+            <%= if motion = Map.get(@last_motion, camera.id) do %>
+              <p class="motion-pill">Motion at {motion.inserted_at}</p>
+            <% end %>
           </article>
         <% end %>
 

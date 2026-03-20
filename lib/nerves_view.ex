@@ -12,6 +12,7 @@ defmodule NervesView do
   alias NervesView.Motion
   alias NervesView.Network.Discovery
   alias NervesView.Pipeline.Manager, as: PipelineManager
+  alias NervesView.Pipeline.MotionDetector
   alias NervesView.Recording.Store, as: RecordingStore
   alias NervesView.Streaming.Signaling
 
@@ -59,7 +60,10 @@ defmodule NervesView do
 
   @spec detect_motion([number()], [number()], keyword()) :: {:ok, map()} | {:error, atom()}
   def detect_motion(previous_frame, current_frame, opts \\ []) do
-    Motion.detect(previous_frame, current_frame, opts)
+    case MotionDetector.detect(previous_frame, current_frame, opts) do
+      {:ok, result} -> {:ok, result}
+      {:error, _reason} -> Motion.detect(previous_frame, current_frame, opts)
+    end
   end
 
   @spec store_recording(map()) :: {:ok, map()} | {:error, atom()}

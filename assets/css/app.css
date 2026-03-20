@@ -149,6 +149,17 @@ button {
   background: var(--brand-soft);
 }
 
+.motion-pill {
+  display: inline-block;
+  margin-top: 0.4rem;
+  border-radius: 999px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  color: #124e52;
+  background: #e0f4e8;
+  border: 1px solid #9ec8ae;
+}
+
 .flash-group {
   margin-bottom: 1rem;
 }
