@@ -34,8 +34,9 @@ Commit trail:
 - `6d27451` phase 3
 - `c70f7aa` phase 4
 - `572cdd7` phase 5
+- `ffe88a5` phase 6
 
-Phase 6 commit hash will be appended as it lands.
+Core phase commit trail complete through phase 6.
 
 ---
 
