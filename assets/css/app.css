@@ -136,6 +136,15 @@ button {
   padding: 0.9rem;
 }
 
+.camera-video {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #0f1d22;
+  aspect-ratio: 16 / 9;
+  margin: 0.5rem 0;
+}
+
 .camera-card.empty {
   background: var(--brand-soft);
 }

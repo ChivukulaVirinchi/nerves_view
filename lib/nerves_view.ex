@@ -24,12 +24,13 @@ defmodule NervesView do
     Registry.upsert(attrs)
   end
 
-  @spec create_stream_offer(String.t()) :: {:ok, %{session_id: String.t(), sdp: String.t()}}
-  def create_stream_offer(camera_id) when is_binary(camera_id) do
+  @spec create_stream_offer(String.t(), String.t()) ::
+          {:ok, %{session_id: String.t(), sdp: String.t()}} | {:error, :camera_not_found}
+  def create_stream_offer(camera_id, viewer_id \\ "viewer") when is_binary(camera_id) do
     offer = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=NervesView\r\nt=0 0\r\n"
 
     with {:ok, _camera} <- Registry.get(camera_id),
-         {:ok, session_id, sdp} <- Signaling.create_offer(camera_id, offer) do
+         {:ok, session_id, sdp} <- Signaling.create_offer(camera_id, viewer_id, offer) do
       {:ok, %{session_id: session_id, sdp: sdp}}
     else
       {:error, :not_found} -> {:error, :camera_not_found}
@@ -45,10 +46,11 @@ defmodule NervesView do
     end
   end
 
-  @spec add_stream_ice_candidate(String.t(), map()) :: :ok | {:error, :session_not_found}
-  def add_stream_ice_candidate(session_id, candidate)
-      when is_binary(session_id) and is_map(candidate) do
-    case Signaling.add_ice_candidate(session_id, candidate) do
+  @spec add_stream_ice_candidate(String.t(), :viewer | :publisher, map()) ::
+          :ok | {:error, :session_not_found}
+  def add_stream_ice_candidate(session_id, role, candidate)
+      when is_binary(session_id) and role in [:viewer, :publisher] and is_map(candidate) do
+    case Signaling.add_ice_candidate(session_id, role, candidate) do
       :ok -> :ok
       {:error, :not_found} -> {:error, :session_not_found}
     end

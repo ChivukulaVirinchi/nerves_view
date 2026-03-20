@@ -65,6 +65,8 @@ defmodule NervesView.MixProject do
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
       {:bandit, "~> 1.5"},
       {:gettext, "~> 0.26"},
+      {:ex_webrtc, "~> 0.14"},
+      {:ex_ice, "~> 0.7"},
 
       # Dependencies for all targets except :host
       {:nerves_pack, "~> 0.7.1", targets: @all_targets},

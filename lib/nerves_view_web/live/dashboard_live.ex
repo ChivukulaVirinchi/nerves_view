@@ -20,6 +20,16 @@ defmodule NervesViewWeb.DashboardLive do
         <%= for camera <- @cameras do %>
           <article class="camera-card">
             <h2>{camera.name}</h2>
+            <video
+              id={"video-#{camera.id}"}
+              class="camera-video"
+              autoplay
+              muted
+              playsinline
+              phx-hook="WebRTCPlayer"
+              data-camera-id={camera.id}
+              data-viewer-id={"viewer-#{@current_user.id}"}
+            ></video>
             <p>ID: {camera.id}</p>
             <p>Status: {camera.status}</p>
           </article>

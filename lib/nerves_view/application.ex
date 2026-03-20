@@ -11,6 +11,8 @@ defmodule NervesView.Application do
       [
         {Phoenix.PubSub, name: NervesView.PubSub},
         NervesViewWeb.Endpoint,
+        {Registry, keys: :unique, name: NervesView.Streaming.Registry},
+        {NervesView.Streaming.PeerSupervisor, []},
 
         # Shared runtime services
         {NervesView.Camera.Registry, []},

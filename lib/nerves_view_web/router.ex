@@ -13,6 +13,10 @@ defmodule NervesViewWeb.Router do
     plug(:fetch_current_user)
   end
 
+  pipeline :api do
+    plug(:accepts, ["json"])
+  end
+
   scope "/", NervesViewWeb do
     pipe_through([:browser])
 
@@ -20,6 +24,14 @@ defmodule NervesViewWeb.Router do
     post("/login", SessionController, :create)
     post("/register", RegistrationController, :create)
     get("/logout", SessionController, :delete)
+  end
+
+  scope "/api", NervesViewWeb do
+    pipe_through([:api])
+
+    post("/webrtc/offer", WebRTCController, :offer)
+    post("/webrtc/answer", WebRTCController, :answer)
+    post("/webrtc/ice-candidate", WebRTCController, :ice_candidate)
   end
 
   scope "/", NervesViewWeb do
