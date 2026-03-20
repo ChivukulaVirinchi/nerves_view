@@ -129,6 +129,35 @@ button {
   margin-top: 1rem;
 }
 
+.camera-form select {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  background: #fff;
+}
+
+.grid-picker {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0.7rem 0;
+}
+
+.layout-1 {
+  grid-template-columns: 1fr;
+}
+
+.layout-2 {
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+}
+
+.layout-4 {
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+}
+
+.layout-9 {
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
 .camera-card {
   background: var(--card);
   border: 1px solid var(--line);

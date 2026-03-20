@@ -13,7 +13,8 @@ defmodule NervesViewWeb.DashboardLive do
      socket
      |> assign(page_title: "Dashboard")
      |> assign(cameras: NervesView.list_cameras())
-     |> assign(last_motion: %{})}
+     |> assign(last_motion: %{})
+     |> assign(grid_layout: 4)}
   end
 
   @impl true
@@ -27,9 +28,16 @@ defmodule NervesViewWeb.DashboardLive do
     ~H"""
     <section>
       <h1>Dashboard</h1>
-      <p class="muted">Live camera grid placeholder (Phase 7).</p>
+      <p class="muted">Live multi-camera dashboard.</p>
 
-      <div class="camera-grid">
+      <div class="grid-picker">
+        <button phx-click="set_layout" phx-value-layout="1">1</button>
+        <button phx-click="set_layout" phx-value-layout="2">2</button>
+        <button phx-click="set_layout" phx-value-layout="4">4</button>
+        <button phx-click="set_layout" phx-value-layout="9">9</button>
+      </div>
+
+      <div class={"camera-grid layout-#{@grid_layout}"}>
         <%= for camera <- @cameras do %>
           <article class="camera-card">
             <h2>{camera.name}</h2>
@@ -60,5 +68,16 @@ defmodule NervesViewWeb.DashboardLive do
       </div>
     </section>
     """
+  end
+
+  @impl true
+  def handle_event("set_layout", %{"layout" => layout}, socket) do
+    parsed =
+      case Integer.parse(layout || "") do
+        {value, _} when value in [1, 2, 4, 9] -> value
+        _ -> 4
+      end
+
+    {:noreply, assign(socket, :grid_layout, parsed)}
   end
 end

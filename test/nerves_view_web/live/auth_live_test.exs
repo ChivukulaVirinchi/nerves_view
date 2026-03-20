@@ -91,7 +91,7 @@ defmodule NervesViewWeb.AuthLiveTest do
     assert redirected_to(conn) == ~p"/dashboard"
 
     conn = get(conn, ~p"/dashboard")
-    assert html_response(conn, 200) =~ "Live camera grid placeholder"
+    assert html_response(conn, 200) =~ "Live multi-camera dashboard"
     assert {:ok, status} = Manager.status("cam-ui")
     assert status.status == :running
   end

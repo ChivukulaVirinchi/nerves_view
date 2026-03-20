@@ -22,6 +22,11 @@ defmodule NervesView do
     Registry.list()
   end
 
+  @spec remove_camera(String.t()) :: :ok
+  def remove_camera(camera_id) when is_binary(camera_id) do
+    Registry.remove(camera_id)
+  end
+
   @spec register_camera(map()) :: {:ok, NervesView.Camera.t()} | {:error, term()}
   def register_camera(attrs) when is_map(attrs) do
     Registry.upsert(attrs)

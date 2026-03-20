@@ -33,6 +33,13 @@ defmodule NervesView.Camera.Registry do
     GenServer.call(@name, {:remove, camera_id})
   end
 
+  @spec list_ids() :: [String.t()]
+  def list_ids do
+    list()
+    |> Enum.map(& &1.id)
+    |> Enum.sort()
+  end
+
   @impl true
   def init(state), do: {:ok, state}
 
