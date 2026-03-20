@@ -22,6 +22,7 @@ defmodule NervesView.Application do
         {NervesView.Streaming.Signaling, []},
         {NervesView.Recording.Store, []},
         {NervesView.Storage.Manager, []},
+        {NervesView.Security.RateLimiter, []},
         {NervesView.Cluster.NodeRegistry, []},
         {NervesView.Cluster.Heartbeat, []},
         {NervesView.Network.Discovery, []},

@@ -17,14 +17,23 @@ defmodule NervesViewWeb.Router do
     plug(:accepts, ["json"])
   end
 
+  pipeline :auth_rate_limited do
+    plug(NervesViewWeb.Plugs.RateLimit, max_attempts: 10, window_seconds: 60)
+  end
+
   scope "/", NervesViewWeb do
     pipe_through([:browser])
 
     get("/", RedirectController, :home)
     get("/recordings/:id/playlist.m3u8", RecordingController, :playlist)
+    get("/logout", SessionController, :delete)
+  end
+
+  scope "/", NervesViewWeb do
+    pipe_through([:browser, :auth_rate_limited])
+
     post("/login", SessionController, :create)
     post("/register", RegistrationController, :create)
-    get("/logout", SessionController, :delete)
   end
 
   scope "/api", NervesViewWeb do

@@ -1,33 +1,31 @@
 # NervesView
 
-**TODO: Add description**
+NervesView is a self-hosted surveillance stack built with Nerves, Elixir, Phoenix LiveView, and Membrane-oriented services.
 
-## Targets
+## Development
 
-Nerves applications produce images for hardware targets based on the
-`MIX_TARGET` environment variable. If `MIX_TARGET` is unset, `mix` builds an
-image that runs on the host (e.g., your laptop). This is useful for executing
-logic tests, running utilities, and debugging. Other targets are represented by
-a short name like `rpi3` that maps to a Nerves system image for that platform.
-All of this logic is in the generated `mix.exs` and may be customized. For more
-information about targets see:
+Run tests on host:
 
-https://hexdocs.pm/nerves/supported-targets.html
+```bash
+MIX_TARGET=host mix test
+```
 
-## Getting Started
+Run Phoenix server on host:
 
-To start your Nerves app:
-  * `export MIX_TARGET=my_target` or prefix every command with
-    `MIX_TARGET=my_target`. For example, `MIX_TARGET=rpi3`
-  * Install dependencies with `mix deps.get`
-  * Create firmware with `mix firmware`
-  * Burn to an SD card with `mix burn`
+```bash
+MIX_TARGET=host mix phx.server
+```
 
-## Learn more
+## Hardware setup guide (Pi Zero 2W)
 
-  * Official docs: https://hexdocs.pm/nerves/getting-started.html
-  * Official website: https://nerves-project.org/
-  * Forum: https://elixirforum.com/c/nerves-forum
-  * Elixir Slack #nerves channel: https://elixir-slack.community/
-  * Elixir Discord #nerves channel: https://discord.gg/elixir
-  * Source: https://github.com/nerves-project/nerves
+1. Flash Nerves firmware and boot your Pi Zero 2W.
+2. Confirm network and SSH access.
+3. Attach camera and verify `/dev/video*` entries.
+4. Add the camera in Settings (`/settings`) with source type and device path.
+5. Open dashboard (`/dashboard`) and verify stream status.
+
+## Security notes
+
+- CSRF protection enabled for browser forms
+- Secure headers enabled in endpoint/router pipeline
+- Host-side in-memory auth rate limiting for login/register
