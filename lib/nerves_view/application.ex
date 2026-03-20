@@ -10,7 +10,8 @@ defmodule NervesView.Application do
     children =
       [
         # Shared runtime services
-        {NervesView.Camera.Registry, []}
+        {NervesView.Camera.Registry, []},
+        {NervesView.Streaming.Signaling, []}
       ] ++ target_children()
 
     # See https://hexdocs.pm/elixir/Supervisor.html

@@ -23,4 +23,21 @@ defmodule NervesViewTest do
     assert camera.id == "kitchen"
     assert [%{id: "kitchen"}] = NervesView.list_cameras()
   end
+
+  test "phase-2 signaling flow creates session and accepts answer" do
+    assert {:ok, _camera} =
+             NervesView.register_camera(%{
+               id: "entry",
+               name: "Entry",
+               source_type: :libcamera,
+               status: :streaming
+             })
+
+    assert {:ok, %{session_id: session_id, sdp: sdp}} = NervesView.create_stream_offer("entry")
+    assert is_binary(session_id)
+    assert is_binary(sdp)
+
+    assert :ok = NervesView.apply_stream_answer(session_id, "v=0")
+    assert :ok = NervesView.add_stream_ice_candidate(session_id, %{"candidate" => "c1"})
+  end
 end
