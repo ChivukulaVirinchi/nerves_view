@@ -11,6 +11,7 @@ defmodule NervesView do
   alias NervesView.Accounts.Store
   alias NervesView.Motion
   alias NervesView.Network.Discovery
+  alias NervesView.Pipeline.Manager, as: PipelineManager
   alias NervesView.Recording.Store, as: RecordingStore
   alias NervesView.Streaming.Signaling
 
@@ -152,5 +153,20 @@ defmodule NervesView do
   @spec list_alerts(keyword()) :: [map()]
   def list_alerts(opts \\ []) do
     Alerts.list(opts)
+  end
+
+  @spec start_test_pipeline(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def start_test_pipeline(camera_id, opts \\ []) when is_binary(camera_id) do
+    PipelineManager.start_pipeline(camera_id, opts)
+  end
+
+  @spec stop_test_pipeline(String.t()) :: :ok
+  def stop_test_pipeline(camera_id) when is_binary(camera_id) do
+    PipelineManager.stop_pipeline(camera_id)
+  end
+
+  @spec pipeline_status(String.t()) :: {:ok, map()} | {:error, :not_found}
+  def pipeline_status(camera_id) when is_binary(camera_id) do
+    PipelineManager.status(camera_id)
   end
 end

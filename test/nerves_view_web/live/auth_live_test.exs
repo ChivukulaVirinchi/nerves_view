@@ -2,11 +2,27 @@ defmodule NervesViewWeb.AuthLiveTest do
   use NervesViewWeb.ConnCase, async: false
 
   alias NervesView.Accounts.SessionStore
+  alias NervesView.Camera.Registry
+  alias NervesView.Pipeline.Manager
   alias NervesView.Accounts.Store
 
   setup do
     :ok = Store.clear()
     :ok = SessionStore.clear()
+    :ok = Manager.clear()
+
+    for camera <- Registry.list() do
+      Registry.remove(camera.id)
+    end
+
+    assert {:ok, _camera} =
+             Registry.upsert(%{
+               id: "cam-ui",
+               name: "UI Camera",
+               source_type: :libcamera,
+               status: :streaming
+             })
+
     :ok
   end
 
@@ -61,5 +77,22 @@ defmodule NervesViewWeb.AuthLiveTest do
       })
 
     assert redirected_to(conn) == ~p"/dashboard"
+  end
+
+  test "dashboard starts test pipeline", %{conn: conn} do
+    assert {:ok, _} = Store.register("dash@example.com", "password123", :viewer)
+
+    conn =
+      post(conn, ~p"/login", %{
+        "email" => "dash@example.com",
+        "password" => "password123"
+      })
+
+    assert redirected_to(conn) == ~p"/dashboard"
+
+    conn = get(conn, ~p"/dashboard")
+    assert html_response(conn, 200) =~ "Live camera grid placeholder"
+    assert {:ok, status} = Manager.status("cam-ui")
+    assert status.status == :running
   end
 end

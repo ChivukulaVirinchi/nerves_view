@@ -28,6 +28,7 @@
 - [x] Phase 6 initial advanced feature completed (motion alerts + throttling + tests)
 - [x] Phase 7 Phoenix app shell completed (LiveView auth UI + protected routes + dashboard skeleton + tests)
 - [x] Phase 8 signaling upgrade completed (session lifecycle manager + API signaling endpoints + browser WebRTC hook + tests)
+- [x] Phase 9 host mock pipeline completed (test source generator + pipeline manager + dashboard start + tests)
 
 Commit trail:
 - `76253ee` bootstrap
@@ -41,6 +42,8 @@ Commit trail:
 Phase 7 commit follows this PLAN update.
 
 Phase 8 commit follows this PLAN update.
+
+Phase 9 commit follows this PLAN update.
 
 Core phase commit trail complete through phase 6.
 

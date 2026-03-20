@@ -67,6 +67,8 @@ defmodule NervesView.MixProject do
       {:gettext, "~> 0.26"},
       {:ex_webrtc, "~> 0.14"},
       {:ex_ice, "~> 0.7"},
+      {:membrane_core, "~> 1.1"},
+      {:membrane_raw_video_format, "~> 0.4.3"},
 
       # Dependencies for all targets except :host
       {:nerves_pack, "~> 0.7.1", targets: @all_targets},

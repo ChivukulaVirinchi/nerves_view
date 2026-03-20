@@ -3,6 +3,8 @@ defmodule NervesViewWeb.DashboardLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    Enum.each(NervesView.list_cameras(), &NervesView.start_test_pipeline(&1.id))
+
     {:ok,
      socket
      |> assign(page_title: "Dashboard")
