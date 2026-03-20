@@ -169,4 +169,11 @@ defmodule NervesView do
   def pipeline_status(camera_id) when is_binary(camera_id) do
     PipelineManager.status(camera_id)
   end
+
+  @spec start_camera_pipeline(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def start_camera_pipeline(camera_id, opts \\ []) when is_binary(camera_id) do
+    with {:ok, camera} <- Registry.get(camera_id) do
+      PipelineManager.start_camera_pipeline(Map.from_struct(camera), opts)
+    end
+  end
 end

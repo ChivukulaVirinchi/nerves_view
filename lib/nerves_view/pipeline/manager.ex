@@ -6,6 +6,7 @@ defmodule NervesView.Pipeline.Manager do
   use GenServer
 
   alias NervesView.Pipeline.TestSource
+  alias NervesView.Pipeline.Camera, as: CameraPipeline
 
   @name __MODULE__
 
@@ -38,6 +39,11 @@ defmodule NervesView.Pipeline.Manager do
     GenServer.call(@name, :clear)
   end
 
+  @spec start_camera_pipeline(map(), keyword()) :: {:ok, map()} | {:error, term()}
+  def start_camera_pipeline(camera, opts \\ []) when is_map(camera) do
+    GenServer.call(@name, {:start_camera_pipeline, camera, opts})
+  end
+
   @impl true
   def init(state), do: {:ok, state}
 
@@ -62,6 +68,21 @@ defmodule NervesView.Pipeline.Manager do
         }
 
         {:reply, {:ok, pipeline}, Map.put(state, camera_id, pipeline)}
+    end
+  end
+
+  def handle_call({:start_camera_pipeline, camera, opts}, _from, state) do
+    case CameraPipeline.build(camera, opts) do
+      {:ok, descriptor} ->
+        pipeline =
+          descriptor
+          |> Map.put(:status, :running)
+          |> Map.put(:inserted_at, System.system_time(:second))
+
+        {:reply, {:ok, pipeline}, Map.put(state, descriptor.camera_id, pipeline)}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
