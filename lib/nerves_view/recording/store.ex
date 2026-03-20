@@ -12,6 +12,9 @@ defmodule NervesView.Recording.Store do
           required(:ended_at) => non_neg_integer(),
           required(:mode) => :continuous | :motion,
           required(:path) => String.t(),
+          optional(:playlist_path) => String.t(),
+          optional(:segment_paths) => [String.t()],
+          optional(:size_bytes) => non_neg_integer(),
           optional(:motion_score) => float()
         }
 

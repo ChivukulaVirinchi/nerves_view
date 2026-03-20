@@ -19,6 +19,7 @@ defmodule NervesView.Application do
         {NervesView.Pipeline.Manager, []},
         {NervesView.Streaming.Signaling, []},
         {NervesView.Recording.Store, []},
+        {NervesView.Storage.Manager, []},
         {NervesView.Cluster.NodeRegistry, []},
         {NervesView.Network.Discovery, []},
         {NervesView.Accounts.Store, []},

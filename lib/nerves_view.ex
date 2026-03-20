@@ -14,6 +14,7 @@ defmodule NervesView do
   alias NervesView.Pipeline.Manager, as: PipelineManager
   alias NervesView.Pipeline.MotionDetector
   alias NervesView.Recording.Store, as: RecordingStore
+  alias NervesView.Storage.Manager, as: StorageManager
   alias NervesView.Streaming.Signaling
 
   @spec list_cameras() :: [NervesView.Camera.t()]
@@ -179,5 +180,18 @@ defmodule NervesView do
     with {:ok, camera} <- Registry.get(camera_id) do
       PipelineManager.start_camera_pipeline(Map.from_struct(camera), opts)
     end
+  end
+
+  @spec storage_usage() :: %{recording_count: non_neg_integer(), total_bytes: non_neg_integer()}
+  def storage_usage do
+    StorageManager.usage()
+  end
+
+  @spec enforce_recording_retention(keyword()) :: %{
+          trimmed: non_neg_integer(),
+          max_count: pos_integer()
+        }
+  def enforce_recording_retention(opts \\ []) do
+    StorageManager.enforce_retention(opts)
   end
 end
