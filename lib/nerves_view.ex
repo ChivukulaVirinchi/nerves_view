@@ -3,6 +3,7 @@ defmodule NervesView do
   Public API for the NervesView foundation phase.
   """
 
+  alias NervesView.Alerts
   alias NervesView.Camera.Registry
   alias NervesView.Cluster.NodeRegistry
   alias NervesView.Accounts.Permissions
@@ -139,4 +140,15 @@ defmodule NervesView do
 
   @spec list_users() :: [map()]
   def list_users, do: Store.list_users()
+
+  @spec notify_motion_event(String.t(), non_neg_integer(), keyword()) ::
+          {:ok, map()} | {:error, atom()}
+  def notify_motion_event(camera_id, timestamp \\ System.system_time(:second), opts \\ []) do
+    Alerts.notify_motion(camera_id, timestamp, opts)
+  end
+
+  @spec list_alerts(keyword()) :: [map()]
+  def list_alerts(opts \\ []) do
+    Alerts.list(opts)
+  end
 end

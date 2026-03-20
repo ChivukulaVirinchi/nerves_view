@@ -4,6 +4,7 @@ defmodule NervesViewTest do
   alias NervesView.Camera.Registry
   alias NervesView.Accounts.SessionStore
   alias NervesView.Accounts.Store, as: AccountStore
+  alias NervesView.Alerts
   alias NervesView.Cluster.NodeRegistry
   alias NervesView.Network.Discovery
   alias NervesView.Recording.Store
@@ -18,6 +19,7 @@ defmodule NervesViewTest do
     :ok = Discovery.clear()
     :ok = AccountStore.clear()
     :ok = SessionStore.clear()
+    :ok = Alerts.clear()
 
     :ok
   end
@@ -127,5 +129,19 @@ defmodule NervesViewTest do
 
     assert :ok = NervesView.logout(session.token)
     assert {:error, :not_found} = NervesView.validate_session(session.token, 1_700_200_001)
+  end
+
+  test "phase-6 alerts flow with throttling" do
+    now = 1_700_300_000
+
+    assert {:ok, %{camera_id: "backyard"}} =
+             NervesView.notify_motion_event("backyard", now, throttle_seconds: 10)
+
+    assert {:error, :throttled} =
+             NervesView.notify_motion_event("backyard", now + 3, throttle_seconds: 10)
+
+    assert {:ok, _} = NervesView.notify_motion_event("backyard", now + 12, throttle_seconds: 10)
+
+    assert [%{camera_id: "backyard"}, %{camera_id: "backyard"}] = NervesView.list_alerts()
   end
 end

@@ -16,7 +16,8 @@ defmodule NervesView.Application do
         {NervesView.Cluster.NodeRegistry, []},
         {NervesView.Network.Discovery, []},
         {NervesView.Accounts.Store, []},
-        {NervesView.Accounts.SessionStore, []}
+        {NervesView.Accounts.SessionStore, []},
+        {NervesView.Alerts, []}
       ] ++ target_children()
 
     # See https://hexdocs.pm/elixir/Supervisor.html

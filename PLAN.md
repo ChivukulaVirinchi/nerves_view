@@ -25,7 +25,7 @@
 - [x] Phase 3 motion and recording core completed (detection + retention store + tests)
 - [x] Phase 4 clustering/discovery core completed (node registry + service discovery + tests)
 - [x] Phase 5 authentication core completed (accounts + sessions + role checks + tests)
-- [ ] Phase 6 advanced features pending
+- [x] Phase 6 initial advanced feature completed (motion alerts + throttling + tests)
 
 Commit trail:
 - `76253ee` bootstrap
@@ -33,8 +33,9 @@ Commit trail:
 - `2698e4a` phase 2
 - `6d27451` phase 3
 - `c70f7aa` phase 4
+- `572cdd7` phase 5
 
-Phase 5 commit hash will be appended as it lands.
+Phase 6 commit hash will be appended as it lands.
 
 ---
 
@@ -538,6 +539,7 @@ RTSP Source -> H264 Parser -> [WebRTC Track, HLS Writer]
 - [ ] DDNS setup documentation
 
 #### 6.2 Notifications
+- [x] Motion alert service with throttling (core backend)
 - [ ] Motion alert push notifications (web push)
 - [ ] Email notifications
 - [ ] Telegram/Signal bot integration
