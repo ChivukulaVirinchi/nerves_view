@@ -5,9 +5,12 @@ defmodule NervesView do
 
   alias NervesView.Camera.Registry
   alias NervesView.Cluster.NodeRegistry
+  alias NervesView.Accounts.Permissions
+  alias NervesView.Accounts.SessionStore
+  alias NervesView.Accounts.Store
   alias NervesView.Motion
   alias NervesView.Network.Discovery
-  alias NervesView.Recording.Store
+  alias NervesView.Recording.Store, as: RecordingStore
   alias NervesView.Streaming.Signaling
 
   @spec list_cameras() :: [NervesView.Camera.t()]
@@ -57,17 +60,17 @@ defmodule NervesView do
 
   @spec store_recording(map()) :: {:ok, map()} | {:error, atom()}
   def store_recording(recording) when is_map(recording) do
-    Store.put(recording)
+    RecordingStore.put(recording)
   end
 
   @spec list_recordings(keyword()) :: [map()]
   def list_recordings(opts \\ []) do
-    Store.list(opts)
+    RecordingStore.list(opts)
   end
 
   @spec trim_recordings(pos_integer()) :: non_neg_integer()
   def trim_recordings(max_count) when is_integer(max_count) and max_count > 0 do
-    Store.trim_by_count(max_count)
+    RecordingStore.trim_by_count(max_count)
   end
 
   @spec register_node(map()) :: {:ok, map()} | {:error, atom()}
@@ -106,4 +109,34 @@ defmodule NervesView do
       when is_integer(max_age_seconds) and max_age_seconds > 0 and is_integer(now_ts) do
     Discovery.prune_stale(max_age_seconds, now_ts)
   end
+
+  @spec register_user(String.t(), String.t(), :admin | :viewer) :: {:ok, map()} | {:error, atom()}
+  def register_user(email, password, role \\ :viewer) do
+    Store.register(email, password, role)
+  end
+
+  @spec login(String.t(), String.t(), keyword()) ::
+          {:ok, %{user: map(), session: map()}} | {:error, atom()}
+  def login(email, password, opts \\ []) do
+    with {:ok, user} <- Store.authenticate(email, password),
+         {:ok, session} <- SessionStore.create(user.id, opts) do
+      {:ok, %{user: user, session: session}}
+    end
+  end
+
+  @spec authorize(atom(), atom()) :: :ok | {:error, :forbidden}
+  def authorize(role, action) when is_atom(role) and is_atom(action) do
+    if Permissions.allowed?(role, action), do: :ok, else: {:error, :forbidden}
+  end
+
+  @spec validate_session(String.t(), non_neg_integer()) :: {:ok, map()} | {:error, atom()}
+  def validate_session(token, now_ts \\ System.system_time(:second)) do
+    SessionStore.fetch(token, now_ts)
+  end
+
+  @spec logout(String.t()) :: :ok
+  def logout(token), do: SessionStore.revoke(token)
+
+  @spec list_users() :: [map()]
+  def list_users, do: Store.list_users()
 end

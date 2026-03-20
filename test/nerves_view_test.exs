@@ -2,6 +2,8 @@ defmodule NervesViewTest do
   use ExUnit.Case, async: false
 
   alias NervesView.Camera.Registry
+  alias NervesView.Accounts.SessionStore
+  alias NervesView.Accounts.Store, as: AccountStore
   alias NervesView.Cluster.NodeRegistry
   alias NervesView.Network.Discovery
   alias NervesView.Recording.Store
@@ -14,6 +16,8 @@ defmodule NervesViewTest do
     :ok = Store.clear()
     :ok = NodeRegistry.clear()
     :ok = Discovery.clear()
+    :ok = AccountStore.clear()
+    :ok = SessionStore.clear()
 
     :ok
   end
@@ -104,5 +108,24 @@ defmodule NervesViewTest do
     assert [%{service_id: "svc-east-front"}] = NervesView.list_camera_services()
     assert ["svc-east-front"] = NervesView.prune_stale_services(5, now + 10)
     assert ["node-east"] = NervesView.prune_stale_nodes(5, now + 10)
+  end
+
+  test "phase-5 account registration, auth and authorization flow" do
+    assert {:ok, admin} =
+             NervesView.register_user("admin@nervesview.local", "password123", :admin)
+
+    assert {:ok, viewer} =
+             NervesView.register_user("viewer@nervesview.local", "password123", :viewer)
+
+    assert {:ok, %{user: logged_in, session: session}} =
+             NervesView.login("admin@nervesview.local", "password123", now: 1_700_200_000)
+
+    assert logged_in.id == admin.id
+    assert {:ok, _session} = NervesView.validate_session(session.token, 1_700_200_001)
+    assert :ok = NervesView.authorize(admin.role, :manage_users)
+    assert {:error, :forbidden} = NervesView.authorize(viewer.role, :manage_users)
+
+    assert :ok = NervesView.logout(session.token)
+    assert {:error, :not_found} = NervesView.validate_session(session.token, 1_700_200_001)
   end
 end

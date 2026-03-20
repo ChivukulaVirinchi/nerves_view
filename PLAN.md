@@ -24,7 +24,7 @@
 - [x] Phase 2 signaling core completed (in-memory WebRTC signaling + tests)
 - [x] Phase 3 motion and recording core completed (detection + retention store + tests)
 - [x] Phase 4 clustering/discovery core completed (node registry + service discovery + tests)
-- [ ] Phase 5 authentication and polish in progress
+- [x] Phase 5 authentication core completed (accounts + sessions + role checks + tests)
 - [ ] Phase 6 advanced features pending
 
 Commit trail:
@@ -32,6 +32,9 @@ Commit trail:
 - `4897aac` phase 1
 - `2698e4a` phase 2
 - `6d27451` phase 3
+- `c70f7aa` phase 4
+
+Phase 5 commit hash will be appended as it lands.
 
 ---
 
@@ -491,14 +494,14 @@ RTSP Source -> H264 Parser -> [WebRTC Track, HLS Writer]
 **Goal:** Production-ready with multi-user support
 
 #### 5.1 User Authentication
-- [ ] Create User schema with roles (admin/viewer)
-- [ ] Implement registration flow
-- [ ] Implement login with sessions
-- [ ] Add "remember me" functionality
+- [x] Create User schema with roles (admin/viewer) - in-memory user model
+- [x] Implement registration flow - API/service layer
+- [x] Implement login with sessions - session store + token lifecycle
+- [x] Add "remember me" functionality
 - [ ] Password reset flow (email optional)
 
 #### 5.2 Authorization
-- [ ] Define permission levels:
+- [x] Define permission levels:
   - **Admin:** full access, manage users, configure system
   - **Viewer:** view cameras, view recordings
 - [ ] Protect routes with plugs
