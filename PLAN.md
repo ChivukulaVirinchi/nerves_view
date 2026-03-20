@@ -18,6 +18,23 @@
 
 ---
 
+## Implementation Status
+
+- [x] Phase 1 foundation completed (camera domain + registry + tests)
+- [x] Phase 2 signaling core completed (in-memory WebRTC signaling + tests)
+- [x] Phase 3 motion and recording core completed (detection + retention store + tests)
+- [x] Phase 4 clustering/discovery core completed (node registry + service discovery + tests)
+- [ ] Phase 5 authentication and polish in progress
+- [ ] Phase 6 advanced features pending
+
+Commit trail:
+- `76253ee` bootstrap
+- `4897aac` phase 1
+- `2698e4a` phase 2
+- `6d27451` phase 3
+
+---
+
 ## Vision & Goals
 
 ### Core Principles
@@ -431,20 +448,20 @@ Camera -> [H264Encoder, FrameSampler -> MotionDetector -> EventDispatcher]
 **Goal:** Support multiple camera nodes managed by a hub
 
 #### 4.1 Hub/Node Architecture
-- [ ] Implement mode detection (hub vs node)
-- [ ] Create node registration protocol
-- [ ] Hub: camera registry GenServer
+- [x] Implement mode detection (hub vs node) - API-level node mode registry
+- [x] Create node registration protocol - in-memory registration + heartbeat
+- [x] Hub: camera registry GenServer - base camera registry already in place
 - [ ] Node: stream forwarding to hub
 
 #### 4.2 Distributed Erlang
 - [ ] Configure libcluster for LAN discovery
 - [ ] Set up Erlang cookie management
-- [ ] Implement node heartbeat/health checks
-- [ ] Handle node disconnection gracefully
+- [x] Implement node heartbeat/health checks
+- [x] Handle node disconnection gracefully (stale node pruning)
 
 #### 4.3 Camera Discovery
-- [ ] Advertise cameras via mDNS
-- [ ] Hub: scan for camera services
+- [x] Advertise cameras via mDNS (service model + announce API)
+- [x] Hub: scan for camera services (discovery cache + list API)
 - [ ] Auto-discovery UI
 - [ ] Manual camera addition (IP cameras)
 

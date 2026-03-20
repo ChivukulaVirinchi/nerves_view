@@ -12,7 +12,9 @@ defmodule NervesView.Application do
         # Shared runtime services
         {NervesView.Camera.Registry, []},
         {NervesView.Streaming.Signaling, []},
-        {NervesView.Recording.Store, []}
+        {NervesView.Recording.Store, []},
+        {NervesView.Cluster.NodeRegistry, []},
+        {NervesView.Network.Discovery, []}
       ] ++ target_children()
 
     # See https://hexdocs.pm/elixir/Supervisor.html

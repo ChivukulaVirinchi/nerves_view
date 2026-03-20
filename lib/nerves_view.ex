@@ -4,7 +4,9 @@ defmodule NervesView do
   """
 
   alias NervesView.Camera.Registry
+  alias NervesView.Cluster.NodeRegistry
   alias NervesView.Motion
+  alias NervesView.Network.Discovery
   alias NervesView.Recording.Store
   alias NervesView.Streaming.Signaling
 
@@ -66,5 +68,42 @@ defmodule NervesView do
   @spec trim_recordings(pos_integer()) :: non_neg_integer()
   def trim_recordings(max_count) when is_integer(max_count) and max_count > 0 do
     Store.trim_by_count(max_count)
+  end
+
+  @spec register_node(map()) :: {:ok, map()} | {:error, atom()}
+  def register_node(attrs) when is_map(attrs) do
+    NodeRegistry.register(attrs)
+  end
+
+  @spec list_nodes(keyword()) :: [map()]
+  def list_nodes(opts \\ []) do
+    NodeRegistry.list(opts)
+  end
+
+  @spec node_heartbeat(String.t(), non_neg_integer()) :: :ok | {:error, :not_found}
+  def node_heartbeat(node_id, timestamp \\ System.system_time(:second)) do
+    NodeRegistry.heartbeat(node_id, timestamp)
+  end
+
+  @spec prune_stale_nodes(pos_integer(), non_neg_integer()) :: [String.t()]
+  def prune_stale_nodes(max_age_seconds, now_ts \\ System.system_time(:second))
+      when is_integer(max_age_seconds) and max_age_seconds > 0 and is_integer(now_ts) do
+    NodeRegistry.prune_stale(max_age_seconds, now_ts)
+  end
+
+  @spec announce_camera_service(map()) :: {:ok, map()} | {:error, atom()}
+  def announce_camera_service(attrs) when is_map(attrs) do
+    Discovery.announce(attrs)
+  end
+
+  @spec list_camera_services() :: [map()]
+  def list_camera_services do
+    Discovery.list()
+  end
+
+  @spec prune_stale_services(pos_integer(), non_neg_integer()) :: [String.t()]
+  def prune_stale_services(max_age_seconds, now_ts \\ System.system_time(:second))
+      when is_integer(max_age_seconds) and max_age_seconds > 0 and is_integer(now_ts) do
+    Discovery.prune_stale(max_age_seconds, now_ts)
   end
 end

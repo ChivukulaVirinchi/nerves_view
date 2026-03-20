@@ -2,6 +2,8 @@ defmodule NervesViewTest do
   use ExUnit.Case, async: false
 
   alias NervesView.Camera.Registry
+  alias NervesView.Cluster.NodeRegistry
+  alias NervesView.Network.Discovery
   alias NervesView.Recording.Store
 
   setup do
@@ -10,6 +12,8 @@ defmodule NervesViewTest do
     end
 
     :ok = Store.clear()
+    :ok = NodeRegistry.clear()
+    :ok = Discovery.clear()
 
     :ok
   end
@@ -63,5 +67,42 @@ defmodule NervesViewTest do
 
     assert [%{id: "motion-1"}] = NervesView.list_recordings(camera_id: "entry")
     assert 0 = NervesView.trim_recordings(10)
+  end
+
+  test "phase-4 node registration and service discovery flow" do
+    now = 1_700_100_000
+
+    assert {:ok, %{id: "hub-main"}} =
+             NervesView.register_node(%{
+               id: "hub-main",
+               mode: :hub,
+               host: "hub.local",
+               port: 4000
+             })
+
+    assert {:ok, %{id: "node-east"}} =
+             NervesView.register_node(%{
+               id: "node-east",
+               mode: :node,
+               host: "east.local",
+               port: 5000
+             })
+
+    assert :ok = NervesView.node_heartbeat("node-east", now)
+    assert [%{id: "node-east"}] = NervesView.list_nodes(mode: :node)
+
+    assert {:ok, %{service_id: "svc-east-front"}} =
+             NervesView.announce_camera_service(%{
+               service_id: "svc-east-front",
+               node_id: "node-east",
+               camera_id: "front-door",
+               host: "east.local",
+               port: 4100,
+               last_seen_at: now
+             })
+
+    assert [%{service_id: "svc-east-front"}] = NervesView.list_camera_services()
+    assert ["svc-east-front"] = NervesView.prune_stale_services(5, now + 10)
+    assert ["node-east"] = NervesView.prune_stale_nodes(5, now + 10)
   end
 end
