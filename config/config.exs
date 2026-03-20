@@ -19,7 +19,16 @@ config :nerves, :firmware, rootfs_overlay: "rootfs_overlay"
 config :nerves, source_date_epoch: "1774002223"
 
 config :nerves_view,
-  ecto_repos: []
+  ecto_repos: [],
+  mode: :standalone
+
+config :libcluster,
+  topologies: [
+    nervesview_local: [
+      strategy: Cluster.Strategy.Epmd,
+      config: [hosts: [:"nervesview@127.0.0.1"]]
+    ]
+  ]
 
 config :phoenix, :json_library, Jason
 

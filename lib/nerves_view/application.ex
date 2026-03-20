@@ -10,6 +10,8 @@ defmodule NervesView.Application do
     children =
       [
         {Phoenix.PubSub, name: NervesView.PubSub},
+        {Cluster.Supervisor,
+         [Application.get_env(:libcluster, :topologies, []), [name: NervesView.ClusterSupervisor]]},
         NervesViewWeb.Endpoint,
         {Registry, keys: :unique, name: NervesView.Streaming.Registry},
         {NervesView.Streaming.PeerSupervisor, []},
@@ -21,6 +23,7 @@ defmodule NervesView.Application do
         {NervesView.Recording.Store, []},
         {NervesView.Storage.Manager, []},
         {NervesView.Cluster.NodeRegistry, []},
+        {NervesView.Cluster.Heartbeat, []},
         {NervesView.Network.Discovery, []},
         {NervesView.Accounts.Store, []},
         {NervesView.Accounts.SessionStore, []},

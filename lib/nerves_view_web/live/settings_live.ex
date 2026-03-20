@@ -52,7 +52,7 @@ defmodule NervesViewWeb.SettingsLive do
       <div class="card-list">
         <article class="camera-card">
           <h2>Node mode</h2>
-          <p>Standalone (default)</p>
+          <p>{NervesView.Mode.current()}</p>
         </article>
 
         <article class="camera-card">

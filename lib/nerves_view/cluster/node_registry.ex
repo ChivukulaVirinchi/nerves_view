@@ -5,11 +5,11 @@ defmodule NervesView.Cluster.NodeRegistry do
 
   @name __MODULE__
 
-  @valid_modes [:hub, :node]
+  @valid_modes [:hub, :node, :standalone]
 
   @type node_record :: %{
           required(:id) => String.t(),
-          required(:mode) => :hub | :node,
+          required(:mode) => :hub | :node | :standalone,
           required(:host) => String.t(),
           required(:port) => non_neg_integer(),
           required(:last_seen_at) => non_neg_integer(),

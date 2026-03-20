@@ -33,6 +33,7 @@
 - [x] Phase 11 motion detection upgrade completed (pipeline detector module + pubsub events + dashboard motion indicators + tests)
 - [x] Phase 12 recording pipeline scaffold completed (synthetic HLS writer + storage manager + playback endpoint/UI + tests)
 - [x] Phase 13 multi-camera UX completed (layout presets + camera add/remove settings UI + dashboard/live tests)
+- [x] Phase 14 distribution groundwork completed (mode config + libcluster topology + heartbeat node registration/pruning + tests)
 
 Commit trail:
 - `76253ee` bootstrap
@@ -56,6 +57,8 @@ Phase 11 commit follows this PLAN update.
 Phase 12 commit follows this PLAN update.
 
 Phase 13 commit follows this PLAN update.
+
+Phase 14 commit follows this PLAN update.
 
 Core phase commit trail complete through phase 6.
 
