@@ -4,6 +4,8 @@ defmodule NervesView do
   """
 
   alias NervesView.Camera.Registry
+  alias NervesView.Motion
+  alias NervesView.Recording.Store
   alias NervesView.Streaming.Signaling
 
   @spec list_cameras() :: [NervesView.Camera.t()]
@@ -44,5 +46,25 @@ defmodule NervesView do
       :ok -> :ok
       {:error, :not_found} -> {:error, :session_not_found}
     end
+  end
+
+  @spec detect_motion([number()], [number()], keyword()) :: {:ok, map()} | {:error, atom()}
+  def detect_motion(previous_frame, current_frame, opts \\ []) do
+    Motion.detect(previous_frame, current_frame, opts)
+  end
+
+  @spec store_recording(map()) :: {:ok, map()} | {:error, atom()}
+  def store_recording(recording) when is_map(recording) do
+    Store.put(recording)
+  end
+
+  @spec list_recordings(keyword()) :: [map()]
+  def list_recordings(opts \\ []) do
+    Store.list(opts)
+  end
+
+  @spec trim_recordings(pos_integer()) :: non_neg_integer()
+  def trim_recordings(max_count) when is_integer(max_count) and max_count > 0 do
+    Store.trim_by_count(max_count)
   end
 end
