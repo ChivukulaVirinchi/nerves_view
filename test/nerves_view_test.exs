@@ -8,6 +8,7 @@ defmodule NervesViewTest do
   alias NervesView.Cluster.NodeRegistry
   alias NervesView.Network.Discovery
   alias NervesView.Recording.Store
+  alias NervesView.Streaming.Signaling
 
   setup do
     for camera <- Registry.list() do
@@ -20,6 +21,7 @@ defmodule NervesViewTest do
     :ok = AccountStore.clear()
     :ok = SessionStore.clear()
     :ok = Alerts.clear()
+    :ok = Signaling.clear()
 
     :ok
   end
@@ -46,12 +48,14 @@ defmodule NervesViewTest do
                status: :streaming
              })
 
-    assert {:ok, %{session_id: session_id, sdp: sdp}} = NervesView.create_stream_offer("entry")
+    assert {:ok, %{session_id: session_id, sdp: sdp}} =
+             NervesView.create_stream_offer("entry", "viewer-1")
+
     assert is_binary(session_id)
     assert is_binary(sdp)
 
     assert :ok = NervesView.apply_stream_answer(session_id, "v=0")
-    assert :ok = NervesView.add_stream_ice_candidate(session_id, %{"candidate" => "c1"})
+    assert :ok = NervesView.add_stream_ice_candidate(session_id, :viewer, %{"candidate" => "c1"})
   end
 
   test "phase-3 motion + recording flow" do
