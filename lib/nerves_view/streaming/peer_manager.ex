@@ -25,11 +25,11 @@ defmodule NervesView.Streaming.PeerManager do
   @spec get_session(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get_session(session_id) do
     case Registry.lookup(NervesView.Streaming.Registry, session_id) do
-      [{_pid, _}] ->
-        try do
+      [{pid, _}] ->
+        if Process.alive?(pid) do
           PeerConnection.snapshot(session_id)
-        catch
-          :exit, _reason -> {:error, :not_found}
+        else
+          {:error, :not_found}
         end
 
       [] ->

@@ -31,10 +31,9 @@ defmodule NervesView.Security.RateLimiter do
       |> Map.get(key, [])
       |> Enum.filter(&(now - &1 < window))
 
-    if length(attempts) >= max_attempts do
-      {:reply, {:error, :rate_limited}, Map.put(state, key, attempts)}
-    else
-      {:reply, :ok, Map.put(state, key, [now | attempts])}
+    case length(attempts) >= max_attempts do
+      true -> {:reply, {:error, :rate_limited}, Map.put(state, key, attempts)}
+      false -> {:reply, :ok, Map.put(state, key, [now | attempts])}
     end
   end
 

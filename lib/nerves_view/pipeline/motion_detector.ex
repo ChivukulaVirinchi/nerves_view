@@ -8,29 +8,35 @@ defmodule NervesView.Pipeline.MotionDetector do
 
   def detect(previous_frame, current_frame, opts)
       when is_list(previous_frame) and is_list(current_frame) do
-    if length(previous_frame) != length(current_frame) or previous_frame == [] do
-      {:error, :invalid_frames}
-    else
-      threshold = Keyword.get(opts, :threshold, 0.18)
-      cooldown = Keyword.get(opts, :cooldown_seconds, 5)
-      min_delta = Keyword.get(opts, :min_delta, 1)
+    case valid_frames?(previous_frame, current_frame) do
+      false ->
+        {:error, :invalid_frames}
 
-      changed =
-        Enum.zip(previous_frame, current_frame)
-        |> Enum.count(fn {a, b} -> abs(a - b) >= min_delta end)
+      true ->
+        threshold = Keyword.get(opts, :threshold, 0.18)
+        cooldown = Keyword.get(opts, :cooldown_seconds, 5)
+        min_delta = Keyword.get(opts, :min_delta, 1)
 
-      score = changed / length(previous_frame)
+        changed =
+          Enum.zip(previous_frame, current_frame)
+          |> Enum.count(fn {a, b} -> abs(a - b) >= min_delta end)
 
-      {:ok,
-       %{
-         motion?: score >= threshold,
-         score: score,
-         changed_pixels: changed,
-         threshold: threshold,
-         cooldown_seconds: cooldown
-       }}
+        score = changed / length(previous_frame)
+
+        {:ok,
+         %{
+           motion?: score >= threshold,
+           score: score,
+           changed_pixels: changed,
+           threshold: threshold,
+           cooldown_seconds: cooldown
+         }}
     end
   end
 
   def detect(_, _, _), do: {:error, :invalid_frames}
+
+  defp valid_frames?(previous_frame, current_frame) do
+    previous_frame != [] and length(previous_frame) == length(current_frame)
+  end
 end

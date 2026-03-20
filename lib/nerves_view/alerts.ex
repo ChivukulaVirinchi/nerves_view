@@ -42,25 +42,27 @@ defmodule NervesView.Alerts do
     throttle_seconds = Keyword.get(opts, :throttle_seconds, 15)
     last_ts = Map.get(state.by_camera, camera_id)
 
-    if is_integer(last_ts) and timestamp - last_ts < throttle_seconds do
-      {:reply, {:error, :throttled}, state}
-    else
-      alert = %{
-        id: alert_id(),
-        camera_id: camera_id,
-        event_type: :motion,
-        inserted_at: timestamp,
-        message: "Motion detected on #{camera_id}"
-      }
+    case throttled?(last_ts, timestamp, throttle_seconds) do
+      true ->
+        {:reply, {:error, :throttled}, state}
 
-      next_state = %{
-        alerts: [alert | state.alerts],
-        by_camera: Map.put(state.by_camera, camera_id, timestamp)
-      }
+      false ->
+        alert = %{
+          id: alert_id(),
+          camera_id: camera_id,
+          event_type: :motion,
+          inserted_at: timestamp,
+          message: "Motion detected on #{camera_id}"
+        }
 
-      Phoenix.PubSub.broadcast(NervesView.PubSub, "alerts:motion", {:motion_alert, alert})
+        next_state = %{
+          alerts: [alert | state.alerts],
+          by_camera: Map.put(state.by_camera, camera_id, timestamp)
+        }
 
-      {:reply, {:ok, alert}, next_state}
+        Phoenix.PubSub.broadcast(NervesView.PubSub, "alerts:motion", {:motion_alert, alert})
+
+        {:reply, {:ok, alert}, next_state}
     end
   end
 
@@ -85,4 +87,11 @@ defmodule NervesView.Alerts do
   end
 
   defp now, do: System.system_time(:second)
+
+  defp throttled?(last_ts, timestamp, throttle_seconds)
+       when is_integer(last_ts) and is_integer(timestamp) and is_integer(throttle_seconds) do
+    timestamp - last_ts < throttle_seconds
+  end
+
+  defp throttled?(_last_ts, _timestamp, _throttle_seconds), do: false
 end

@@ -2,10 +2,22 @@ defmodule NervesViewWeb.SessionController do
   use NervesViewWeb, :controller
 
   alias NervesView
+  alias NervesView.Security.RateLimiter
   alias NervesViewWeb.UserAuth
 
   def create(conn, %{"email" => email, "password" => password} = params) do
-    opts = if Map.get(params, "remember_me") == "true", do: [remember_me: true], else: []
+    with :ok <- rate_limit(conn, 10) do
+      do_create(conn, email, password, params)
+    else
+      {:error, :rate_limited} ->
+        conn
+        |> put_flash(:error, "Too many attempts, try again shortly.")
+        |> redirect(to: ~p"/login")
+    end
+  end
+
+  defp do_create(conn, email, password, params) do
+    opts = remember_opts(params)
 
     case NervesView.login(email, password, opts) do
       {:ok, %{session: session}} ->
@@ -31,5 +43,13 @@ defmodule NervesViewWeb.SessionController do
     |> configure_session(drop: true)
     |> put_flash(:info, "Logged out.")
     |> redirect(to: ~p"/login")
+  end
+
+  defp remember_opts(%{"remember_me" => "true"}), do: [remember_me: true]
+  defp remember_opts(_params), do: []
+
+  defp rate_limit(conn, max_attempts) do
+    ip = to_string(:inet.ntoa(conn.remote_ip || {127, 0, 0, 1}))
+    RateLimiter.check("auth:#{ip}", max_attempts: max_attempts, window_seconds: 60)
   end
 end
