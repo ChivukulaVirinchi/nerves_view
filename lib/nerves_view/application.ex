@@ -9,6 +9,9 @@ defmodule NervesView.Application do
   def start(_type, _args) do
     children =
       [
+        {Phoenix.PubSub, name: NervesView.PubSub},
+        NervesViewWeb.Endpoint,
+
         # Shared runtime services
         {NervesView.Camera.Registry, []},
         {NervesView.Streaming.Signaling, []},
@@ -24,6 +27,12 @@ defmodule NervesView.Application do
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: NervesView.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  @impl true
+  def config_change(changed, _new, removed) do
+    NervesViewWeb.Endpoint.config_change(changed, removed)
+    :ok
   end
 
   # List all child processes to be supervised

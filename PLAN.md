@@ -26,6 +26,7 @@
 - [x] Phase 4 clustering/discovery core completed (node registry + service discovery + tests)
 - [x] Phase 5 authentication core completed (accounts + sessions + role checks + tests)
 - [x] Phase 6 initial advanced feature completed (motion alerts + throttling + tests)
+- [x] Phase 7 Phoenix app shell completed (LiveView auth UI + protected routes + dashboard skeleton + tests)
 
 Commit trail:
 - `76253ee` bootstrap
@@ -35,6 +36,8 @@ Commit trail:
 - `c70f7aa` phase 4
 - `572cdd7` phase 5
 - `ffe88a5` phase 6
+
+Phase 7 commit follows this PLAN update.
 
 Core phase commit trail complete through phase 6.
 

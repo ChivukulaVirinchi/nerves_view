@@ -66,7 +66,7 @@ config :mdns_lite,
   # because otherwise any of the devices may respond to nerves.local leading to
   # unpredictable behavior.
 
-  hosts: [:hostname, "nerves"],
+  hosts: [:hostname, "nerves", "nervesview"],
   ttl: 120,
 
   # Advertise the following services over mDNS.
@@ -85,6 +85,11 @@ config :mdns_lite,
       protocol: "epmd",
       transport: "tcp",
       port: 4369
+    },
+    %{
+      protocol: "http",
+      transport: "tcp",
+      port: 4000
     }
   ]
 

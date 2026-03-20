@@ -18,6 +18,39 @@ config :nerves, :firmware, rootfs_overlay: "rootfs_overlay"
 
 config :nerves, source_date_epoch: "1774002223"
 
+config :nerves_view,
+  ecto_repos: []
+
+config :phoenix, :json_library, Jason
+
+config :nerves_view, NervesViewWeb.Endpoint,
+  url: [host: "localhost"],
+  adapter: Bandit.PhoenixAdapter,
+  render_errors: [
+    formats: [html: NervesViewWeb.ErrorHTML],
+    layout: false
+  ],
+  pubsub_server: NervesView.PubSub,
+  live_view: [signing_salt: "nervesviewsalt"]
+
+config :esbuild,
+  version: "0.25.11",
+  nerves_view: [
+    args:
+      ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets --external:/fonts/* --external:/images/*),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{"NODE_PATH" => Path.expand("../deps", __DIR__)}
+  ]
+
+config :tailwind,
+  version: "4.1.13",
+  nerves_view: [
+    args: ~w(--input=assets/css/app.css --output=priv/static/assets/app.css),
+    cd: Path.expand("..", __DIR__)
+  ]
+
+import_config "#{config_env()}.exs"
+
 if Mix.target() == :host do
   import_config "host.exs"
 else

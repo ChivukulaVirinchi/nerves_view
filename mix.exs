@@ -26,9 +26,11 @@ defmodule NervesView.MixProject do
       elixir: "~> 1.19",
       archives: [nerves_bootstrap: "~> 1.14"],
       start_permanent: Mix.env() == :prod,
+      elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       releases: [{@app, release()}],
-      preferred_cli_target: [run: :host, test: :host]
+      preferred_cli_target: [run: :host, test: :host],
+      aliases: aliases()
     ]
   end
 
@@ -52,6 +54,17 @@ defmodule NervesView.MixProject do
       # Allow Nerves.Runtime on host to support development, testing and CI.
       # See config/host.exs for usage.
       {:nerves_runtime, "~> 0.13.0"},
+      {:phoenix, "~> 1.7.12"},
+      {:phoenix_html, "~> 4.1"},
+      {:phoenix_live_view, "~> 1.0"},
+      {:phoenix_live_reload, "~> 1.5", only: :dev},
+      {:phoenix_live_dashboard, "~> 0.8"},
+      {:jason, "~> 1.4"},
+      {:lazy_html, ">= 0.1.0", only: :test},
+      {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
+      {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
+      {:bandit, "~> 1.5"},
+      {:gettext, "~> 0.26"},
 
       # Dependencies for all targets except :host
       {:nerves_pack, "~> 0.7.1", targets: @all_targets},
@@ -74,6 +87,22 @@ defmodule NervesView.MixProject do
       {:nerves_system_rpi4, "~> 1.24", runtime: false, targets: :rpi4},
       {:nerves_system_rpi5, "~> 0.2", runtime: false, targets: :rpi5},
       {:nerves_system_x86_64, "~> 1.24", runtime: false, targets: :x86_64}
+    ]
+  end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
+  defp aliases do
+    [
+      setup: ["deps.get"],
+      "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
+      "assets.build": ["tailwind nerves_view", "esbuild nerves_view"],
+      "assets.deploy": [
+        "tailwind nerves_view --minify",
+        "esbuild nerves_view --minify",
+        "phx.digest"
+      ]
     ]
   end
 

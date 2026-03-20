@@ -34,6 +34,11 @@ defmodule NervesView.Accounts.Store do
     GenServer.call(@name, :list_users)
   end
 
+  @spec get_user(String.t()) :: {:ok, user()} | {:error, :not_found}
+  def get_user(user_id) when is_binary(user_id) do
+    GenServer.call(@name, {:get_user, user_id})
+  end
+
   @spec clear() :: :ok
   def clear do
     GenServer.call(@name, :clear)
@@ -91,6 +96,13 @@ defmodule NervesView.Accounts.Store do
   def handle_call(:list_users, _from, state) do
     users = state |> Map.values() |> Enum.sort_by(& &1.email)
     {:reply, users, state}
+  end
+
+  def handle_call({:get_user, user_id}, _from, state) do
+    case Map.fetch(state, user_id) do
+      {:ok, user} -> {:reply, {:ok, user}, state}
+      :error -> {:reply, {:error, :not_found}, state}
+    end
   end
 
   def handle_call(:clear, _from, _state) do

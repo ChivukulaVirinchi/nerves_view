@@ -1,0 +1,23 @@
+<div class="app-shell">
+  <header class="top-nav">
+    <div>
+      <a href={~p"/dashboard"} class="brand">NervesView</a>
+    </div>
+    <nav class="top-links">
+      <a href={~p"/dashboard"}>Dashboard</a>
+      <a href={~p"/recordings"}>Recordings</a>
+      <a href={~p"/settings"}>Settings</a>
+      <%= if @current_user do %>
+        <span class="user-email">{@current_user.email}</span>
+        <a href={~p"/logout"}>Logout</a>
+      <% else %>
+        <a href={~p"/login"}>Login</a>
+      <% end %>
+    </nav>
+  </header>
+
+  <main class="page-main">
+    <.flash_group flash={@flash} />
+    {@inner_content}
+  </main>
+</div>
