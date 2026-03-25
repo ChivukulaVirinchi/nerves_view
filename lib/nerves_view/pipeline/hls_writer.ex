@@ -22,7 +22,8 @@ defmodule NervesView.Pipeline.HLSWriter do
     segment_paths = Enum.map(1..segments, &Path.join(dir, "segment-#{&1}.ts"))
 
     :ok = File.mkdir_p(dir)
-    Enum.each(segment_paths, &write_segment_file(&1, camera_id, rec_id, &1))
+    variant = Keyword.get(opts, :variant, :simulated)
+    Enum.each(segment_paths, &write_segment_file(&1, camera_id, rec_id, variant))
     :ok = write_playlist_file(playlist_path, segment_paths, segment_duration)
 
     size_bytes =
@@ -49,8 +50,8 @@ defmodule NervesView.Pipeline.HLSWriter do
     Store.put(recording)
   end
 
-  defp write_segment_file(path, camera_id, rec_id, segment_path) do
-    content = "NervesView segment camera=#{camera_id} recording=#{rec_id} path=#{segment_path}\n"
+  defp write_segment_file(path, camera_id, rec_id, variant) do
+    content = "NervesView segment camera=#{camera_id} recording=#{rec_id} variant=#{variant}\n"
     :ok = File.write(path, content)
   end
 

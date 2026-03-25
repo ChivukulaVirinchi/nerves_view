@@ -42,5 +42,6 @@ defmodule NervesViewWeb.DashboardLiveTest do
     assert html =~ "phx-value-layout=\"9\""
     assert html =~ "Pipeline"
     assert html =~ "Healthy"
+    assert html =~ "yes"
   end
 end

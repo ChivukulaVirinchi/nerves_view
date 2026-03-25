@@ -126,6 +126,8 @@ defmodule NervesViewWeb.SettingsLive do
             <p>Path: {diag.device_path || "n/a"}</p>
             <p>Pipeline: {diag.pipeline_status || :stopped}</p>
             <p>Healthy: {if diag.healthy, do: "yes", else: "no"}</p>
+            <p>Last frame: {diag.last_frame_at || "n/a"}</p>
+            <p>Runtime source: {diag.source_path || "n/a"}</p>
             <p :if={diag.last_error}>Last error: {inspect(diag.last_error)}</p>
           </article>
         <% end %>

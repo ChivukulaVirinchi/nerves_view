@@ -2,12 +2,13 @@ defmodule NervesViewWeb.WebRTCController do
   use NervesViewWeb, :controller
 
   alias NervesView.Camera.Registry
+  alias NervesView.Streaming.MediaBridge
   alias NervesView.Streaming.Signaling
 
   def offer(conn, %{"camera_id" => camera_id, "viewer_id" => viewer_id}) do
     with {:ok, _camera} <- Registry.get(camera_id),
          {:ok, session_id, offer_sdp} <-
-           Signaling.create_offer(camera_id, viewer_id, server_offer_sdp()) do
+           Signaling.create_offer(camera_id, viewer_id, MediaBridge.offer_sdp(camera_id)) do
       json(conn, %{session_id: session_id, offer_sdp: offer_sdp})
     else
       {:error, :not_found} ->
@@ -73,8 +74,4 @@ defmodule NervesViewWeb.WebRTCController do
   defp parse_role("viewer"), do: {:ok, :viewer}
   defp parse_role("publisher"), do: {:ok, :publisher}
   defp parse_role(_), do: {:error, :invalid_role}
-
-  defp server_offer_sdp do
-    "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=NervesView-Live\r\nt=0 0\r\na=group:BUNDLE 0\r\na=msid-semantic: WMS\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\nc=IN IP4 0.0.0.0\r\na=rtpmap:96 H264/90000\r\na=recvonly\r\n"
-  end
 end

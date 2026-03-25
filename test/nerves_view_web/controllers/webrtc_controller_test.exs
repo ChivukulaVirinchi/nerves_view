@@ -20,7 +20,8 @@ defmodule NervesViewWeb.WebRTCControllerTest do
 
   test "offer, answer and ice flow", %{conn: conn} do
     conn = post(conn, ~p"/api/webrtc/offer", %{camera_id: "front-door", viewer_id: "viewer-1"})
-    assert %{"session_id" => session_id, "offer_sdp" => _offer} = json_response(conn, 200)
+    assert %{"session_id" => session_id, "offer_sdp" => offer} = json_response(conn, 200)
+    assert offer =~ "NervesView-front-door"
 
     conn =
       post(build_conn(), ~p"/api/webrtc/answer", %{session_id: session_id, answer_sdp: "v=0"})

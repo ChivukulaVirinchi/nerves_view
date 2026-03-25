@@ -26,7 +26,8 @@ defmodule NervesView.Diagnostics do
       pipeline_status: pipeline && pipeline.status,
       healthy: Map.get(health, :healthy, false),
       source_path: Map.get(health, :source_path),
-      last_error: pipeline && pipeline[:last_error]
+      last_frame_at: Map.get(health, :last_frame_at),
+      last_error: (pipeline && pipeline[:last_error]) || Map.get(health, :last_error)
     }
   end
 end

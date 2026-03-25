@@ -51,9 +51,13 @@ defmodule NervesViewWeb.RecordingsLive do
              source_type: :libcamera,
              status: :streaming
            }),
-         {:ok, _} <- NervesView.Pipeline.HLSWriter.write("rec-cam", mode: :motion),
          {:ok, _} <-
-           NervesView.Pipeline.HLSWriter.write("rec-cam", now: System.system_time(:second) + 30) do
+           NervesView.Pipeline.HLSWriter.write("rec-cam", mode: :motion, variant: :live_path),
+         {:ok, _} <-
+           NervesView.Pipeline.HLSWriter.write("rec-cam",
+             now: System.system_time(:second) + 30,
+             variant: :live_path
+           ) do
       :ok
     else
       _ -> :ok
