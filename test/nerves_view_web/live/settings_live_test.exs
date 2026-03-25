@@ -30,5 +30,7 @@ defmodule NervesViewWeb.SettingsLiveTest do
     html = html_response(conn, 200)
     assert html =~ "Add camera"
     assert html =~ "camera[source_type]"
+    assert html =~ "Diagnostics"
+    assert html =~ "No diagnostics yet"
   end
 end

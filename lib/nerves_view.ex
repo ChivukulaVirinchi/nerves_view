@@ -5,6 +5,7 @@ defmodule NervesView do
 
   alias NervesView.Alerts
   alias NervesView.Camera.Registry
+  alias NervesView.Diagnostics
   alias NervesView.Cluster.NodeRegistry
   alias NervesView.Accounts.Permissions
   alias NervesView.Accounts.SessionStore
@@ -183,6 +184,19 @@ defmodule NervesView do
   @spec pipeline_health(String.t()) :: {:ok, map()} | {:error, :not_found}
   def pipeline_health(camera_id) when is_binary(camera_id) do
     PipelineManager.health(camera_id)
+  end
+
+  @spec restart_camera_pipeline(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def restart_camera_pipeline(camera_id, opts \\ []) when is_binary(camera_id) do
+    :ok = PipelineManager.stop_pipeline(camera_id)
+    start_camera_pipeline(camera_id, opts)
+  end
+
+  @spec camera_diagnostics() :: [map()]
+  def camera_diagnostics do
+    list_cameras()
+    |> Enum.map(&Diagnostics.camera_status/1)
+    |> Enum.sort_by(& &1.camera_id)
   end
 
   @spec start_camera_pipeline(String.t(), keyword()) :: {:ok, map()} | {:error, term()}

@@ -13,6 +13,7 @@ defmodule NervesViewWeb.DashboardLive do
      socket
      |> assign(page_title: "Dashboard")
      |> assign(cameras: NervesView.list_cameras())
+     |> assign(diagnostics: diagnostics_by_id())
      |> assign(last_motion: %{})
      |> assign(grid_layout: 4)}
   end
@@ -39,6 +40,7 @@ defmodule NervesViewWeb.DashboardLive do
 
       <div class={"camera-grid layout-#{@grid_layout}"}>
         <%= for camera <- @cameras do %>
+          <% diag = Map.get(@diagnostics, camera.id, %{}) %>
           <article class="camera-card">
             <h2>{camera.name}</h2>
             <video
@@ -53,6 +55,8 @@ defmodule NervesViewWeb.DashboardLive do
             ></video>
             <p>ID: {camera.id}</p>
             <p>Status: {camera.status}</p>
+            <p>Pipeline: {Map.get(diag, :pipeline_status, :stopped)}</p>
+            <p>Healthy: {if Map.get(diag, :healthy, false), do: "yes", else: "no"}</p>
             <%= if motion = Map.get(@last_motion, camera.id) do %>
               <p class="motion-pill">Motion at {motion.inserted_at}</p>
             <% end %>
@@ -79,5 +83,10 @@ defmodule NervesViewWeb.DashboardLive do
       end
 
     {:noreply, assign(socket, :grid_layout, parsed)}
+  end
+
+  defp diagnostics_by_id do
+    NervesView.camera_diagnostics()
+    |> Map.new(fn item -> {item.camera_id, item} end)
   end
 end

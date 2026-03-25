@@ -7,6 +7,7 @@ defmodule NervesViewWeb.SettingsLive do
      socket
      |> assign(page_title: "Settings")
      |> assign(cameras: NervesView.list_cameras())
+     |> assign(diagnostics: NervesView.camera_diagnostics())
      |> assign(form: default_camera_form())}
   end
 
@@ -26,6 +27,7 @@ defmodule NervesViewWeb.SettingsLive do
          socket
          |> put_flash(:info, "Camera added")
          |> assign(cameras: NervesView.list_cameras())
+         |> assign(diagnostics: NervesView.camera_diagnostics())
          |> assign(form: default_camera_form())}
 
       {:error, _reason} ->
@@ -39,7 +41,24 @@ defmodule NervesViewWeb.SettingsLive do
     {:noreply,
      socket
      |> put_flash(:info, "Camera removed")
-     |> assign(cameras: NervesView.list_cameras())}
+     |> assign(cameras: NervesView.list_cameras())
+     |> assign(diagnostics: NervesView.camera_diagnostics())}
+  end
+
+  def handle_event("restart_camera", %{"id" => id}, socket) do
+    case NervesView.restart_camera_pipeline(id) do
+      {:ok, _pipeline} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Camera pipeline restarted")
+         |> assign(diagnostics: NervesView.camera_diagnostics())}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Could not restart camera pipeline")
+         |> assign(diagnostics: NervesView.camera_diagnostics())}
+    end
   end
 
   @impl true
@@ -92,6 +111,29 @@ defmodule NervesViewWeb.SettingsLive do
             <p>Type: {camera.source_type}</p>
             <p>Path: {camera.device_path || "n/a"}</p>
             <button phx-click="remove_camera" phx-value-id={camera.id}>Remove</button>
+            <button phx-click="restart_camera" phx-value-id={camera.id}>Restart pipeline</button>
+          </article>
+        <% end %>
+      </div>
+
+      <h2>Diagnostics</h2>
+      <div class="card-list">
+        <%= for diag <- @diagnostics do %>
+          <article class="camera-card">
+            <h3>{diag.camera_name}</h3>
+            <p>Camera ID: {diag.camera_id}</p>
+            <p>Backend: {diag.source_type}</p>
+            <p>Path: {diag.device_path || "n/a"}</p>
+            <p>Pipeline: {diag.pipeline_status || :stopped}</p>
+            <p>Healthy: {if diag.healthy, do: "yes", else: "no"}</p>
+            <p :if={diag.last_error}>Last error: {inspect(diag.last_error)}</p>
+          </article>
+        <% end %>
+
+        <%= if @diagnostics == [] do %>
+          <article class="camera-card empty">
+            <h3>No diagnostics yet</h3>
+            <p>Add a camera to see runtime health details.</p>
           </article>
         <% end %>
       </div>
