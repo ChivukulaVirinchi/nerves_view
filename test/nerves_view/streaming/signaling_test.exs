@@ -11,12 +11,12 @@ defmodule NervesView.Streaming.SignalingTest do
   test "creates offer and stores session" do
     assert {:ok, session_id, sdp} = Signaling.create_offer("cam-1", "viewer-1", "fake-offer")
     assert is_binary(session_id)
-    assert sdp == "fake-offer"
+    assert String.contains?(sdp, "m=video")
 
     assert {:ok, session} = Signaling.get_session(session_id)
     assert session.camera_id == "cam-1"
     assert session.viewer_id == "viewer-1"
-    assert session.offer_sdp == "fake-offer"
+    assert String.contains?(session.offer_sdp, "m=video")
     assert session.state == :connecting
   end
 

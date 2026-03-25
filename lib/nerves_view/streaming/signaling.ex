@@ -102,9 +102,9 @@ defmodule NervesView.Streaming.Signaling do
     session_id = unique_session_id()
 
     with {:ok, _pid} <- PeerManager.start_session(session_id, camera_id, viewer_id),
-         :ok <- PeerConnection.set_offer(session_id, offer_sdp) do
+         {:ok, generated_offer} <- PeerConnection.create_offer(session_id, offer_sdp) do
       session = session_from_peer!(session_id)
-      {:reply, {:ok, session_id, offer_sdp}, Map.put(state, session_id, session)}
+      {:reply, {:ok, session_id, generated_offer}, Map.put(state, session_id, session)}
     else
       {:error, reason} ->
         {:reply, {:error, reason}, state}
