@@ -1,16 +1,17 @@
-defmodule NervesViewWeb.Auth.RegisterLive do
+defmodule NervesViewWeb.Auth.SetupLive do
   use NervesViewWeb, :live_view
+
+  alias NervesViewWeb.RegistrationController
 
   @impl true
   def mount(_params, _session, socket) do
-    role_hint =
-      if NervesViewWeb.RegistrationController.first_boot?(NervesView.list_users()) do
-        "First account becomes admin."
-      else
-        "New account will have viewer access."
-      end
+    case RegistrationController.first_boot?() do
+      true ->
+        {:ok, assign(socket, page_title: "Initial Setup")}
 
-    {:ok, assign(socket, page_title: "Register", role_hint: role_hint)}
+      false ->
+        {:ok, Phoenix.LiveView.redirect(socket, to: ~p"/login")}
+    end
   end
 
   @impl true
@@ -18,8 +19,8 @@ defmodule NervesViewWeb.Auth.RegisterLive do
     ~H"""
     <section class="auth-wrap">
       <div class="auth-card">
-        <h1>Create account</h1>
-        <p class="muted">{@role_hint}</p>
+        <h1>Initial setup</h1>
+        <p class="muted">Create the first admin account to start using NervesView.</p>
 
         <form action={~p"/register"} method="post" class="auth-form">
           <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
@@ -36,10 +37,8 @@ defmodule NervesViewWeb.Auth.RegisterLive do
             autocomplete="new-password"
           />
 
-          <button type="submit">Register</button>
+          <button type="submit">Create admin account</button>
         </form>
-
-        <p class="muted">Already have an account? <a href={~p"/login"}>Sign in</a></p>
       </div>
     </section>
     """

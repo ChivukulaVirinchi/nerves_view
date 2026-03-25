@@ -34,12 +34,38 @@ defmodule NervesView.Application do
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: NervesView.Supervisor]
-    Supervisor.start_link(children, opts)
+
+    case Supervisor.start_link(children, opts) do
+      {:ok, _pid} = ok ->
+        :ok = ensure_default_camera_started()
+        ok
+
+      other ->
+        other
+    end
   end
 
   @impl true
   def config_change(changed, _new, removed) do
     NervesViewWeb.Endpoint.config_change(changed, removed)
+    :ok
+  end
+
+  defp ensure_default_camera_started do
+    cameras = NervesView.list_cameras()
+
+    if cameras == [] do
+      _ =
+        NervesView.register_camera(%{
+          id: "cam-local",
+          name: "Local Camera",
+          source_type: :libcamera,
+          status: :streaming,
+          device_path: "/dev/video0"
+        })
+    end
+
+    Enum.each(NervesView.list_cameras(), &NervesView.start_camera_pipeline(&1.id))
     :ok
   end
 

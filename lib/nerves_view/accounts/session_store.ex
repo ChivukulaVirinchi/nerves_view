@@ -3,8 +3,11 @@ defmodule NervesView.Accounts.SessionStore do
 
   use GenServer
 
+  alias NervesView.Persistence
+
   @name __MODULE__
   @ttl_seconds 86_400
+  @persist_file "sessions.term"
 
   @type session :: %{
           required(:token) => String.t(),
@@ -39,7 +42,7 @@ defmodule NervesView.Accounts.SessionStore do
   def clear, do: GenServer.call(@name, :clear)
 
   @impl true
-  def init(state), do: {:ok, state}
+  def init(_state), do: {:ok, Persistence.load(@persist_file, %{})}
 
   @impl true
   def handle_call({:create, user_id, opts}, _from, state) do
@@ -53,7 +56,9 @@ defmodule NervesView.Accounts.SessionStore do
       expires_at: ts + ttl
     }
 
-    {:reply, {:ok, session}, Map.put(state, session.token, session)}
+    next_state = Map.put(state, session.token, session)
+    :ok = Persistence.save(@persist_file, next_state)
+    {:reply, {:ok, session}, next_state}
   end
 
   def handle_call({:fetch, token, now_ts}, _from, state) do
@@ -62,7 +67,9 @@ defmodule NervesView.Accounts.SessionStore do
         {:reply, {:ok, session}, state}
 
       {:ok, _session} ->
-        {:reply, {:error, :expired}, Map.delete(state, token)}
+        next_state = Map.delete(state, token)
+        :ok = Persistence.save(@persist_file, next_state)
+        {:reply, {:error, :expired}, next_state}
 
       :error ->
         {:reply, {:error, :not_found}, state}
@@ -70,7 +77,9 @@ defmodule NervesView.Accounts.SessionStore do
   end
 
   def handle_call({:revoke, token}, _from, state) do
-    {:reply, :ok, Map.delete(state, token)}
+    next_state = Map.delete(state, token)
+    :ok = Persistence.save(@persist_file, next_state)
+    {:reply, :ok, next_state}
   end
 
   def handle_call({:prune_expired, now_ts}, _from, state) do
@@ -80,10 +89,12 @@ defmodule NervesView.Accounts.SessionStore do
       |> Enum.map(fn {token, _session} -> token end)
 
     next_state = Enum.reduce(expired, state, &Map.delete(&2, &1))
+    :ok = Persistence.save(@persist_file, next_state)
     {:reply, expired, next_state}
   end
 
   def handle_call(:clear, _from, _state) do
+    :ok = Persistence.save(@persist_file, %{})
     {:reply, :ok, %{}}
   end
 

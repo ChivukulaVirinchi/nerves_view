@@ -3,8 +3,11 @@ defmodule NervesView.Accounts.Store do
 
   use GenServer
 
+  alias NervesView.Persistence
+
   @name __MODULE__
   @roles [:admin, :viewer]
+  @persist_file "users.term"
 
   @type user :: %{
           required(:id) => String.t(),
@@ -45,7 +48,7 @@ defmodule NervesView.Accounts.Store do
   end
 
   @impl true
-  def init(state), do: {:ok, state}
+  def init(_state), do: {:ok, Persistence.load(@persist_file, %{})}
 
   @impl true
   def handle_call({:register, email, password, role}, _from, state) do
@@ -73,7 +76,9 @@ defmodule NervesView.Accounts.Store do
           inserted_at: System.system_time(:second)
         }
 
-        {:reply, {:ok, user}, Map.put(state, user.id, user)}
+        next_state = Map.put(state, user.id, user)
+        :ok = Persistence.save(@persist_file, next_state)
+        {:reply, {:ok, user}, next_state}
     end
   end
 
@@ -106,6 +111,7 @@ defmodule NervesView.Accounts.Store do
   end
 
   def handle_call(:clear, _from, _state) do
+    :ok = Persistence.save(@persist_file, %{})
     {:reply, :ok, %{}}
   end
 

@@ -13,6 +13,7 @@ defmodule NervesViewWeb.ConnCase do
   end
 
   setup _tags do
+    :ok = NervesView.Security.RateLimiter.clear()
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 end

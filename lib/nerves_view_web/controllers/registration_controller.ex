@@ -5,6 +5,13 @@ defmodule NervesViewWeb.RegistrationController do
   alias NervesView.Security.RateLimiter
   alias NervesViewWeb.UserAuth
 
+  def first_boot?(users \\ nil) do
+    case users || NervesView.list_users() do
+      [] -> true
+      _ -> false
+    end
+  end
+
   def create(conn, %{"email" => email, "password" => password}) do
     with :ok <- rate_limit(conn, 6) do
       role = registration_role()
@@ -40,8 +47,8 @@ defmodule NervesViewWeb.RegistrationController do
   end
 
   defp registration_role do
-    case NervesView.list_users() do
-      [] -> :admin
+    case first_boot?() do
+      true -> :admin
       _users -> :viewer
     end
   end

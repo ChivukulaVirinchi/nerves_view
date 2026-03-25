@@ -7,6 +7,7 @@ defmodule NervesViewWeb.AuthLiveTest do
   alias NervesView.Accounts.Store
 
   setup do
+    File.rm_rf!("tmp/persistence")
     :ok = Store.clear()
     :ok = SessionStore.clear()
     :ok = Manager.clear()
@@ -27,7 +28,10 @@ defmodule NervesViewWeb.AuthLiveTest do
   end
 
   test "register first user promotes admin and redirects to dashboard", %{conn: conn} do
-    {:ok, _view, html} = live(conn, ~p"/register")
+    conn = get(conn, ~p"/")
+    assert redirected_to(conn) == ~p"/setup"
+
+    {:ok, _view, html} = live(build_conn(), ~p"/register")
     assert html =~ "First account becomes admin"
 
     conn =
@@ -94,5 +98,12 @@ defmodule NervesViewWeb.AuthLiveTest do
     assert html_response(conn, 200) =~ "Live multi-camera dashboard"
     assert {:ok, status} = Manager.status("cam-ui")
     assert status.status == :running
+  end
+
+  test "setup route redirects to login after first user exists", %{conn: conn} do
+    assert {:ok, _} = Store.register("owner2@example.com", "password123", :admin)
+
+    conn = get(conn, ~p"/setup")
+    assert redirected_to(conn) == ~p"/login"
   end
 end

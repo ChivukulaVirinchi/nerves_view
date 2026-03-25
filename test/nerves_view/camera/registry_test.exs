@@ -4,6 +4,8 @@ defmodule NervesView.Camera.RegistryTest do
   alias NervesView.Camera.Registry
 
   setup do
+    File.rm_rf!("tmp/persistence")
+
     for camera <- Registry.list() do
       Registry.remove(camera.id)
     end
@@ -36,5 +38,21 @@ defmodule NervesView.Camera.RegistryTest do
     assert {:ok, camera} = Registry.get("garage")
     assert camera.name == "Garage"
     assert {:error, :not_found} = Registry.get("missing")
+  end
+
+  test "persists registry state to disk" do
+    assert {:ok, camera} =
+             Registry.upsert(%{
+               id: "cam-persist",
+               name: "Persisted",
+               source_type: :libcamera,
+               status: :streaming
+             })
+
+    path = NervesView.Persistence.path_for("cameras.term")
+    assert File.exists?(path)
+    assert {:ok, bin} = File.read(path)
+    persisted = :erlang.binary_to_term(bin)
+    assert persisted[camera.id].id == "cam-persist"
   end
 end

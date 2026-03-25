@@ -1,11 +1,13 @@
 defmodule NervesViewWeb.RedirectController do
   use NervesViewWeb, :controller
 
+  alias NervesViewWeb.RegistrationController
+
   def home(conn, _params) do
-    if conn.assigns[:current_user] do
-      redirect(conn, to: ~p"/dashboard")
-    else
-      redirect(conn, to: ~p"/login")
+    cond do
+      conn.assigns[:current_user] -> redirect(conn, to: ~p"/dashboard")
+      RegistrationController.first_boot?() -> redirect(conn, to: ~p"/setup")
+      true -> redirect(conn, to: ~p"/login")
     end
   end
 end

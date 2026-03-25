@@ -64,6 +64,7 @@ defmodule NervesView.Pipeline.Manager do
       :error ->
         descriptor = %{
           camera_id: camera_id,
+          camera_name: camera_id,
           source_type: :test,
           source: %{device_path: "test://pattern", backend: :test},
           outputs: %{webrtc: true, motion_detector: true},
@@ -76,13 +77,19 @@ defmodule NervesView.Pipeline.Manager do
   end
 
   def handle_call({:start_camera_pipeline, camera, opts}, _from, state) do
-    case CameraPipeline.build(camera, opts) do
-      {:ok, descriptor} ->
-        descriptor = Map.put(descriptor, :inserted_at, System.system_time(:second))
-        do_start_runtime(descriptor, opts, state)
+    camera_id = camera[:id] || camera["id"]
 
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
+    if is_binary(camera_id) and Map.has_key?(state, camera_id) do
+      {:reply, {:ok, Map.fetch!(state, camera_id)}, state}
+    else
+      case CameraPipeline.build(camera, opts) do
+        {:ok, descriptor} ->
+          descriptor = Map.put(descriptor, :inserted_at, System.system_time(:second))
+          do_start_runtime(descriptor, opts, state)
+
+        {:error, reason} ->
+          {:reply, {:error, reason}, state}
+      end
     end
   end
 

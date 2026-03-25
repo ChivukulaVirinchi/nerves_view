@@ -7,7 +7,7 @@ defmodule NervesViewWeb.DashboardLive do
       Phoenix.PubSub.subscribe(NervesView.PubSub, "alerts:motion")
     end
 
-    Enum.each(NervesView.list_cameras(), &NervesView.start_test_pipeline(&1.id))
+    Enum.each(NervesView.list_cameras(), &NervesView.start_camera_pipeline(&1.id))
 
     {:ok,
      socket

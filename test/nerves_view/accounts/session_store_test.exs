@@ -4,6 +4,7 @@ defmodule NervesView.Accounts.SessionStoreTest do
   alias NervesView.Accounts.SessionStore
 
   setup do
+    File.rm_rf!("tmp/persistence")
     :ok = SessionStore.clear()
     :ok
   end
@@ -32,5 +33,14 @@ defmodule NervesView.Accounts.SessionStoreTest do
     assert expired_token == s1.token
     assert {:error, :not_found} = SessionStore.fetch(s1.token, base + 86_401)
     assert {:ok, _} = SessionStore.fetch(s2.token, base + 86_401)
+  end
+
+  test "persists sessions to disk" do
+    assert {:ok, session} = SessionStore.create("user-3", now: 100)
+    path = NervesView.Persistence.path_for("sessions.term")
+    assert File.exists?(path)
+    assert {:ok, bin} = File.read(path)
+    persisted = :erlang.binary_to_term(bin)
+    assert persisted[session.token].user_id == "user-3"
   end
 end

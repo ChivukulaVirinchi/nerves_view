@@ -41,6 +41,7 @@ defmodule NervesViewWeb.Router do
 
     live_session :redirect_if_user_is_authenticated,
       on_mount: [{NervesViewWeb.UserAuth, :mount_current_user}] do
+      live("/setup", Auth.SetupLive, :new)
       live("/login", Auth.LoginLive, :new)
       live("/register", Auth.RegisterLive, :new)
     end

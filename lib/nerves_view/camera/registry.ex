@@ -4,8 +4,10 @@ defmodule NervesView.Camera.Registry do
   use GenServer
 
   alias NervesView.Camera
+  alias NervesView.Persistence
 
   @name __MODULE__
+  @persist_file "cameras.term"
 
   @type state :: %{required(String.t()) => Camera.t()}
 
@@ -41,7 +43,9 @@ defmodule NervesView.Camera.Registry do
   end
 
   @impl true
-  def init(state), do: {:ok, state}
+  def init(_state) do
+    {:ok, Persistence.load(@persist_file, %{})}
+  end
 
   @impl true
   def handle_call(:list, _from, state) do
@@ -58,6 +62,7 @@ defmodule NervesView.Camera.Registry do
   def handle_call({:upsert, attrs}, _from, state) do
     with {:ok, camera} <- Camera.new(attrs) do
       next_state = Map.put(state, camera.id, camera)
+      :ok = Persistence.save(@persist_file, next_state)
       {:reply, {:ok, camera}, next_state}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
@@ -65,6 +70,8 @@ defmodule NervesView.Camera.Registry do
   end
 
   def handle_call({:remove, camera_id}, _from, state) do
-    {:reply, :ok, Map.delete(state, camera_id)}
+    next_state = Map.delete(state, camera_id)
+    :ok = Persistence.save(@persist_file, next_state)
+    {:reply, :ok, next_state}
   end
 end

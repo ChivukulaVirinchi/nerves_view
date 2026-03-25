@@ -15,6 +15,7 @@ defmodule NervesView.Pipeline.Camera do
       {:ok,
        %{
          camera_id: normalized.id,
+         camera_name: Map.get(normalized, :name),
          source_type: normalized.source_type,
          source: %{device_path: normalized.device_path, backend: normalized.capture_backend},
          encoder: %{codec: :h264, mode: :hardware_preferred, bitrate: bitrate, keyint: fps * 2},
