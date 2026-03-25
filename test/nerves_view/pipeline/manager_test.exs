@@ -15,11 +15,29 @@ defmodule NervesView.Pipeline.ManagerTest do
     assert pipeline.status == :running
 
     assert {:ok, status} = Manager.status("cam-1")
-    frames = wait_for_frames(status.source_pid, 6)
+    frames = wait_for_frames(status.runtime.source_pid, 6)
     assert length(frames) == 6
+    assert {:ok, health} = Manager.health("cam-1")
+    assert health.healthy
 
     assert :ok = Manager.stop_pipeline("cam-1")
     assert {:error, :not_found} = Manager.status("cam-1")
+    assert {:error, :not_found} = Manager.health("cam-1")
+  end
+
+  test "starts source-normalized camera pipeline" do
+    assert {:ok, pipeline} =
+             Manager.start_camera_pipeline(%{
+               id: "cam-real",
+               name: "Real Cam",
+               source_type: :libcamera,
+               device_path: "/dev/video0",
+               status: :streaming
+             })
+
+    assert pipeline.camera_id == "cam-real"
+    assert pipeline.source_type == :libcamera
+    assert pipeline.status == :running
   end
 
   defp wait_for_frames(pid, expected, attempts_left \\ 40)

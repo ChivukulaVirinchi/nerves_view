@@ -180,6 +180,11 @@ defmodule NervesView do
     PipelineManager.status(camera_id)
   end
 
+  @spec pipeline_health(String.t()) :: {:ok, map()} | {:error, :not_found}
+  def pipeline_health(camera_id) when is_binary(camera_id) do
+    PipelineManager.health(camera_id)
+  end
+
   @spec start_camera_pipeline(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def start_camera_pipeline(camera_id, opts \\ []) when is_binary(camera_id) do
     with {:ok, camera} <- Registry.get(camera_id) do

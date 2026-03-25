@@ -1,12 +1,15 @@
 defmodule NervesView.Pipeline.Manager do
   @moduledoc """
-  Starts/stops host test pipelines per camera and exposes status.
+  Starts/stops camera pipelines and exposes runtime health.
   """
 
   use GenServer
 
-  alias NervesView.Pipeline.TestSource
   alias NervesView.Pipeline.Camera, as: CameraPipeline
+
+  @runtime_module if Mix.target() == :host,
+                    do: NervesView.Pipeline.Runtime.Host,
+                    else: NervesView.Pipeline.Runtime.Target
 
   @name __MODULE__
 
@@ -27,6 +30,11 @@ defmodule NervesView.Pipeline.Manager do
   @spec status(String.t()) :: {:ok, map()} | {:error, :not_found}
   def status(camera_id) when is_binary(camera_id) do
     GenServer.call(@name, {:status, camera_id})
+  end
+
+  @spec health(String.t()) :: {:ok, map()} | {:error, :not_found}
+  def health(camera_id) when is_binary(camera_id) do
+    GenServer.call(@name, {:health, camera_id})
   end
 
   @spec list() :: [map()]
@@ -54,32 +62,24 @@ defmodule NervesView.Pipeline.Manager do
         {:reply, {:ok, pipeline}, state}
 
       :error ->
-        frame_count = Keyword.get(opts, :frame_count, 30)
-        interval_ms = Keyword.get(opts, :interval_ms, 33)
-
-        {:ok, pid} = TestSource.start_link(frame_count: frame_count, interval_ms: interval_ms)
-
-        pipeline = %{
+        descriptor = %{
           camera_id: camera_id,
-          source: :test,
-          status: :running,
-          source_pid: pid,
+          source_type: :test,
+          source: %{device_path: "test://pattern", backend: :test},
+          outputs: %{webrtc: true, motion_detector: true},
+          stream: %{resolution: {1280, 720}, fps: 30},
           inserted_at: System.system_time(:second)
         }
 
-        {:reply, {:ok, pipeline}, Map.put(state, camera_id, pipeline)}
+        do_start_runtime(descriptor, opts, state)
     end
   end
 
   def handle_call({:start_camera_pipeline, camera, opts}, _from, state) do
     case CameraPipeline.build(camera, opts) do
       {:ok, descriptor} ->
-        pipeline =
-          descriptor
-          |> Map.put(:status, :running)
-          |> Map.put(:inserted_at, System.system_time(:second))
-
-        {:reply, {:ok, pipeline}, Map.put(state, descriptor.camera_id, pipeline)}
+        descriptor = Map.put(descriptor, :inserted_at, System.system_time(:second))
+        do_start_runtime(descriptor, opts, state)
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -92,8 +92,8 @@ defmodule NervesView.Pipeline.Manager do
         {nil, state_after_pop} ->
           state_after_pop
 
-        {%{source_pid: pid}, state_after_pop} ->
-          if Process.alive?(pid), do: Process.exit(pid, :normal)
+        {pipeline, state_after_pop} ->
+          :ok = @runtime_module.stop_pipeline(pipeline)
           state_after_pop
       end
 
@@ -107,15 +107,35 @@ defmodule NervesView.Pipeline.Manager do
     end
   end
 
+  def handle_call({:health, camera_id}, _from, state) do
+    case Map.fetch(state, camera_id) do
+      {:ok, pipeline} ->
+        {:reply, {:ok, @runtime_module.health(pipeline)}, state}
+
+      :error ->
+        {:reply, {:error, :not_found}, state}
+    end
+  end
+
   def handle_call(:list, _from, state) do
     {:reply, Map.values(state), state}
   end
 
   def handle_call(:clear, _from, state) do
-    Enum.each(state, fn {_camera_id, %{source_pid: pid}} ->
-      if Process.alive?(pid), do: Process.exit(pid, :normal)
+    Enum.each(state, fn {_camera_id, pipeline} ->
+      :ok = @runtime_module.stop_pipeline(pipeline)
     end)
 
     {:reply, :ok, %{}}
+  end
+
+  defp do_start_runtime(descriptor, opts, state) do
+    case @runtime_module.start_pipeline(descriptor, opts) do
+      {:ok, pipeline} ->
+        {:reply, {:ok, pipeline}, Map.put(state, descriptor.camera_id, pipeline)}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 end
