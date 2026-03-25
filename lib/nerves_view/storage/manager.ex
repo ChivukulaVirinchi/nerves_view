@@ -40,6 +40,17 @@ defmodule NervesView.Storage.Manager do
 
   def handle_call({:enforce_retention, opts}, _from, state) do
     max_count = Keyword.get(opts, :max_count, 200)
+    to_remove = Enum.drop(Store.list(), max_count)
+
+    Enum.each(to_remove, fn rec ->
+      paths = [Map.get(rec, :playlist_path) | Map.get(rec, :segment_paths, [])]
+
+      Enum.each(paths, fn
+        nil -> :ok
+        path -> File.rm(path)
+      end)
+    end)
+
     trimmed = Store.trim_by_count(max_count)
     {:reply, %{trimmed: trimmed, max_count: max_count}, state}
   end

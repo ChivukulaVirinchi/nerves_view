@@ -1,9 +1,11 @@
 defmodule NervesView.Pipeline.HLSWriter do
   @moduledoc """
-  Synthetic HLS writer for host/testing flow.
+  File-backed HLS writer for local recording flow.
   """
 
   alias NervesView.Recording.Store
+
+  @default_base_dir "tmp/recordings"
 
   @spec write(String.t(), keyword()) :: {:ok, map()} | {:error, atom()}
   def write(camera_id, opts \\ []) when is_binary(camera_id) do
@@ -11,9 +13,26 @@ defmodule NervesView.Pipeline.HLSWriter do
     duration = Keyword.get(opts, :duration_seconds, 20)
     segments = Keyword.get(opts, :segments, 4)
     mode = Keyword.get(opts, :mode, :continuous)
+    segment_duration = Keyword.get(opts, :segment_duration, 6)
 
     rec_id = "rec-#{camera_id}-#{now}"
-    base = "/data/hls/#{camera_id}/#{rec_id}"
+    base_dir = Application.get_env(:nerves_view, :recordings_path, @default_base_dir)
+    dir = Path.join([base_dir, camera_id, rec_id])
+    playlist_path = Path.join(dir, "playlist.m3u8")
+    segment_paths = Enum.map(1..segments, &Path.join(dir, "segment-#{&1}.ts"))
+
+    :ok = File.mkdir_p(dir)
+    Enum.each(segment_paths, &write_segment_file(&1, camera_id, rec_id, &1))
+    :ok = write_playlist_file(playlist_path, segment_paths, segment_duration)
+
+    size_bytes =
+      segment_paths
+      |> Enum.reduce(0, fn path, acc ->
+        case File.stat(path) do
+          {:ok, stat} -> acc + stat.size
+          _ -> acc
+        end
+      end)
 
     recording = %{
       id: rec_id,
@@ -21,12 +40,32 @@ defmodule NervesView.Pipeline.HLSWriter do
       started_at: now,
       ended_at: now + duration,
       mode: mode,
-      path: "#{base}.m3u8",
-      playlist_path: "#{base}.m3u8",
-      segment_paths: Enum.map(1..segments, &"#{base}-#{&1}.ts"),
-      size_bytes: segments * 1_024 * 512
+      path: playlist_path,
+      playlist_path: playlist_path,
+      segment_paths: segment_paths,
+      size_bytes: size_bytes
     }
 
     Store.put(recording)
+  end
+
+  defp write_segment_file(path, camera_id, rec_id, segment_path) do
+    content = "NervesView segment camera=#{camera_id} recording=#{rec_id} path=#{segment_path}\n"
+    :ok = File.write(path, content)
+  end
+
+  defp write_playlist_file(playlist_path, segment_paths, segment_duration) do
+    lines =
+      [
+        "#EXTM3U",
+        "#EXT-X-VERSION:3",
+        "#EXT-X-TARGETDURATION:#{segment_duration}",
+        "#EXT-X-MEDIA-SEQUENCE:0"
+      ] ++
+        Enum.flat_map(segment_paths, fn segment ->
+          ["#EXTINF:#{segment_duration}.0,", Path.basename(segment)]
+        end) ++ ["#EXT-X-ENDLIST"]
+
+    File.write(playlist_path, Enum.join(lines, "\n") <> "\n")
   end
 end

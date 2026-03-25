@@ -22,6 +22,7 @@ defmodule NervesViewWeb.Router do
 
     get("/", RedirectController, :home)
     get("/recordings/:id/playlist.m3u8", RecordingController, :playlist)
+    get("/recordings/:id/segments/:segment", RecordingController, :segment)
     post("/login", SessionController, :create)
     post("/register", RegistrationController, :create)
     get("/logout", SessionController, :delete)

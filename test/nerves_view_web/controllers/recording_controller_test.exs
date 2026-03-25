@@ -15,6 +15,13 @@ defmodule NervesViewWeb.RecordingControllerTest do
     body = response(conn, 200)
 
     assert body =~ "#EXTM3U"
-    assert body =~ ".ts"
+    assert body =~ "/recordings/#{rec.id}/segments/"
+  end
+
+  test "serves segment file", %{conn: conn, recording: rec} do
+    segment = rec.segment_paths |> List.first() |> Path.basename()
+    conn = get(conn, ~p"/recordings/#{rec.id}/segments/#{segment}")
+    body = response(conn, 200)
+    assert body =~ "NervesView segment"
   end
 end

@@ -15,11 +15,17 @@ defmodule NervesView.Storage.ManagerTest do
     assert {:ok, _} = HLSWriter.write("cam-a", now: 1_700_701_010)
     assert {:ok, _} = HLSWriter.write("cam-a", now: 1_700_701_020)
 
+    [latest, second_latest, oldest] = Store.list()
+    assert File.exists?(oldest.playlist_path)
+
     usage = Manager.usage()
     assert usage.recording_count == 3
     assert usage.total_bytes > 0
 
     result = Manager.enforce_retention(max_count: 2)
     assert result.trimmed == 1
+    refute File.exists?(oldest.playlist_path)
+    assert File.exists?(latest.playlist_path)
+    assert File.exists?(second_latest.playlist_path)
   end
 end
