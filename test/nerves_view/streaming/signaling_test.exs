@@ -17,11 +17,13 @@ defmodule NervesView.Streaming.SignalingTest do
     assert session.camera_id == "cam-1"
     assert session.viewer_id == "viewer-1"
     assert session.offer_sdp == "fake-offer"
+    assert session.state == :connecting
   end
 
   test "applies answer and candidate to existing session" do
     assert {:ok, session_id, _} = Signaling.create_offer("cam-2", "viewer-2", "offer")
     assert :ok = Signaling.apply_answer(session_id, "answer")
+    assert :ok = Signaling.mark_connected(session_id)
 
     candidate = %{"candidate" => "candidate:1 1 UDP 1 0.0.0.0 9 typ host"}
     assert :ok = Signaling.add_ice_candidate(session_id, :viewer, candidate)
@@ -29,6 +31,13 @@ defmodule NervesView.Streaming.SignalingTest do
     assert {:ok, session} = Signaling.get_session(session_id)
     assert session.answer_sdp == "answer"
     assert session.ice_candidates.viewer == [candidate]
+    assert session.state == :connected
+  end
+
+  test "reaps expired sessions that are not connected" do
+    assert {:ok, session_id, _} = Signaling.create_offer("cam-3", "viewer-3", "offer")
+    assert [^session_id] = Signaling.reap_expired(System.system_time(:second) + 120)
+    assert {:error, :not_found} = Signaling.get_session(session_id)
   end
 
   test "returns not found for unknown session" do

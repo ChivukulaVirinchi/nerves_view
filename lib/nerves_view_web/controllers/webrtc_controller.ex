@@ -31,6 +31,7 @@ defmodule NervesViewWeb.WebRTCController do
   def answer(conn, %{"session_id" => session_id, "answer_sdp" => answer_sdp}) do
     case Signaling.apply_answer(session_id, answer_sdp) do
       :ok ->
+        :ok = Signaling.mark_connected(session_id)
         json(conn, %{ok: true})
 
       {:error, :not_found} ->
@@ -74,6 +75,6 @@ defmodule NervesViewWeb.WebRTCController do
   defp parse_role(_), do: {:error, :invalid_role}
 
   defp server_offer_sdp do
-    "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=NervesView\r\nt=0 0\r\n"
+    "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=NervesView-Live\r\nt=0 0\r\na=group:BUNDLE 0\r\na=msid-semantic: WMS\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\nc=IN IP4 0.0.0.0\r\na=rtpmap:96 H264/90000\r\na=recvonly\r\n"
   end
 end

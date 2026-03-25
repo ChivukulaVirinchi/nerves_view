@@ -48,6 +48,13 @@ const WebRTCPlayer = {
         })
       }
 
+      this.pc.onconnectionstatechange = () => {
+        const state = this.pc?.connectionState
+        if (state === "failed" || state === "disconnected") {
+          this.scheduleReconnect()
+        }
+      }
+
       this.pc.ontrack = (event) => {
         if (this.el.srcObject !== event.streams[0]) {
           this.el.srcObject = event.streams[0]
@@ -69,11 +76,20 @@ const WebRTCPlayer = {
 
       this.state.retries = 0
     } catch (_error) {
-      const waitMs = Math.min(1000 * 2 ** this.state.retries, 15000)
-      this.state.retries += 1
-
-      setTimeout(() => this.connect(), waitMs)
+      this.scheduleReconnect()
     }
+  },
+
+  scheduleReconnect() {
+    if (this.state.stopped) return
+    if (this.pc) {
+      this.pc.close()
+      this.pc = null
+    }
+
+    const waitMs = Math.min(1000 * 2 ** this.state.retries, 15000)
+    this.state.retries += 1
+    setTimeout(() => this.connect(), waitMs)
   },
 }
 

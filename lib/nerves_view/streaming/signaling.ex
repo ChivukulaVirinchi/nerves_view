@@ -16,6 +16,9 @@ defmodule NervesView.Streaming.Signaling do
           optional(:offer_sdp) => String.t(),
           optional(:answer_sdp) => String.t(),
           required(:ice_candidates) => %{viewer: [map()], publisher: [map()]},
+          required(:state) => :new | :connecting | :connected | :closed,
+          optional(:state_reason) => term(),
+          required(:timeout_at) => non_neg_integer(),
           required(:inserted_at) => non_neg_integer(),
           required(:updated_at) => non_neg_integer()
         }
@@ -61,6 +64,21 @@ defmodule NervesView.Streaming.Signaling do
   @spec clear() :: :ok
   def clear do
     GenServer.call(@name, :clear)
+  end
+
+  @spec mark_connected(String.t()) :: :ok | {:error, :not_found}
+  def mark_connected(session_id) when is_binary(session_id) do
+    GenServer.call(@name, {:mark_connected, session_id})
+  end
+
+  @spec close_session(String.t(), term()) :: :ok | {:error, :not_found}
+  def close_session(session_id, reason \\ :normal) when is_binary(session_id) do
+    GenServer.call(@name, {:close_session, session_id, reason})
+  end
+
+  @spec reap_expired(non_neg_integer()) :: [String.t()]
+  def reap_expired(now_ts \\ System.system_time(:second)) when is_integer(now_ts) do
+    GenServer.call(@name, {:reap_expired, now_ts})
   end
 
   @impl true
@@ -127,6 +145,41 @@ defmodule NervesView.Streaming.Signaling do
     {:reply, :ok, Map.delete(state, session_id)}
   end
 
+  def handle_call({:mark_connected, session_id}, _from, state) do
+    case PeerManager.get_session(session_id) do
+      {:ok, _session} ->
+        :ok = PeerConnection.mark_connected(session_id)
+        {:reply, :ok, Map.put(state, session_id, session_from_peer!(session_id))}
+
+      {:error, :not_found} ->
+        {:reply, {:error, :not_found}, state}
+    end
+  end
+
+  def handle_call({:close_session, session_id, reason}, _from, state) do
+    case PeerManager.get_session(session_id) do
+      {:ok, _session} ->
+        :ok = PeerConnection.close(session_id, reason)
+        {:reply, :ok, Map.put(state, session_id, session_from_peer!(session_id))}
+
+      {:error, :not_found} ->
+        {:reply, {:error, :not_found}, state}
+    end
+  end
+
+  def handle_call({:reap_expired, now_ts}, _from, state) do
+    expired_ids =
+      state
+      |> Enum.filter(fn {_id, session} ->
+        session.timeout_at <= now_ts and session.state != :connected
+      end)
+      |> Enum.map(fn {id, _session} -> id end)
+
+    Enum.each(expired_ids, &PeerManager.stop_session/1)
+    next_state = Enum.reduce(expired_ids, state, &Map.delete(&2, &1))
+    {:reply, expired_ids, next_state}
+  end
+
   def handle_call(:clear, _from, state) do
     Enum.each(Map.keys(state), &PeerManager.stop_session/1)
     {:reply, :ok, %{}}
@@ -141,6 +194,9 @@ defmodule NervesView.Streaming.Signaling do
       offer_sdp: peer.offer_sdp,
       answer_sdp: peer.answer_sdp,
       ice_candidates: peer.ice_candidates,
+      state: peer.state,
+      state_reason: peer.state_reason,
+      timeout_at: peer.timeout_at,
       inserted_at: peer.inserted_at,
       updated_at: peer.updated_at
     }

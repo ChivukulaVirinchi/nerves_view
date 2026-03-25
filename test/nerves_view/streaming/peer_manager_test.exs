@@ -19,6 +19,11 @@ defmodule NervesView.Streaming.PeerManagerTest do
     assert updated.offer_sdp == "offer"
     assert updated.answer_sdp == "answer"
     assert updated.ice_candidates.viewer == [%{"candidate" => "v1"}]
+    assert updated.state in [:connecting, :new]
+
+    assert :ok = PeerConnection.mark_connected(session_id)
+    assert {:ok, connected} = PeerManager.get_session(session_id)
+    assert connected.state == :connected
 
     assert :ok = PeerManager.stop_session(session_id)
     assert {:error, :not_found} = PeerManager.get_session(session_id)

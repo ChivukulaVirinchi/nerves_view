@@ -6,6 +6,7 @@ defmodule NervesView.Streaming.PeerConnection do
   use GenServer
 
   @type role :: :viewer | :publisher
+  @timeout_seconds 45
 
   def start_link(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
@@ -21,6 +22,8 @@ defmodule NervesView.Streaming.PeerConnection do
   end
 
   def snapshot(session_id), do: GenServer.call(via(session_id), :snapshot)
+  def mark_connected(session_id), do: GenServer.call(via(session_id), :mark_connected)
+  def close(session_id, reason \\ :normal), do: GenServer.call(via(session_id), {:close, reason})
   def stop(session_id), do: GenServer.stop(via(session_id), :normal)
 
   @impl true
@@ -34,6 +37,9 @@ defmodule NervesView.Streaming.PeerConnection do
       offer_sdp: nil,
       answer_sdp: nil,
       ice_candidates: %{viewer: [], publisher: []},
+      state: :new,
+      state_reason: nil,
+      timeout_at: now + @timeout_seconds,
       inserted_at: now,
       updated_at: now
     }
@@ -43,18 +49,66 @@ defmodule NervesView.Streaming.PeerConnection do
 
   @impl true
   def handle_call({:set_offer, sdp}, _from, state) do
-    next = %{state | offer_sdp: sdp, updated_at: System.system_time(:second)}
+    now = System.system_time(:second)
+
+    next = %{
+      state
+      | offer_sdp: sdp,
+        state: :connecting,
+        updated_at: now,
+        timeout_at: now + @timeout_seconds
+    }
+
     {:reply, :ok, next}
   end
 
   def handle_call({:set_answer, sdp}, _from, state) do
-    next = %{state | answer_sdp: sdp, updated_at: System.system_time(:second)}
+    now = System.system_time(:second)
+
+    next = %{
+      state
+      | answer_sdp: sdp,
+        state: :connecting,
+        updated_at: now,
+        timeout_at: now + @timeout_seconds
+    }
+
     {:reply, :ok, next}
   end
 
   def handle_call({:add_ice, role, candidate}, _from, state) do
     next_candidates = Map.update!(state.ice_candidates, role, &[candidate | &1])
-    next = %{state | ice_candidates: next_candidates, updated_at: System.system_time(:second)}
+    now = System.system_time(:second)
+
+    next = %{
+      state
+      | ice_candidates: next_candidates,
+        updated_at: now,
+        timeout_at: now + @timeout_seconds
+    }
+
+    {:reply, :ok, next}
+  end
+
+  def handle_call(:mark_connected, _from, state) do
+    next = %{
+      state
+      | state: :connected,
+        state_reason: nil,
+        updated_at: System.system_time(:second)
+    }
+
+    {:reply, :ok, next}
+  end
+
+  def handle_call({:close, reason}, _from, state) do
+    next = %{
+      state
+      | state: :closed,
+        state_reason: reason,
+        updated_at: System.system_time(:second)
+    }
+
     {:reply, :ok, next}
   end
 
