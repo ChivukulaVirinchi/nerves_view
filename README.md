@@ -24,6 +24,18 @@ MIX_TARGET=host mix phx.server
 4. Add the camera in Settings (`/settings`) with source type and device path.
 5. Open dashboard (`/dashboard`) and verify stream status.
 
+## Camera-day runbook (Option 1 all-in-one)
+
+1. Flash firmware to SD and boot Pi Zero 2W.
+2. Open the app root URL and complete initial setup (`/setup`) for first admin.
+3. Add local camera in Settings using `libcamera` and `/dev/video0`.
+4. Confirm diagnostics in Settings show pipeline healthy.
+5. Open Dashboard for live stream and Recordings for playback checks.
+
+## Deferred roadmap
+
+- Option 2 (hub/node distributed mode) is intentionally deferred and tracked in `plans/camera_ready/phase_7_release_checklist.md`.
+
 ## Security notes
 
 - CSRF protection enabled for browser forms

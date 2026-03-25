@@ -35,6 +35,13 @@
 - [x] Phase 13 multi-camera UX completed (layout presets + camera add/remove settings UI + dashboard/live tests)
 - [x] Phase 14 distribution groundwork completed (mode config + libcluster topology + heartbeat node registration/pruning + tests)
 - [x] Phase 15 production hardening baseline completed (rate limiter plug/service + SSL force config + updated setup docs + tests)
+- [x] Camera-ready Option 1 phase 1 completed (baseline stabilization)
+- [x] Camera-ready Option 1 phase 2 completed (runtime pipeline backends + health)
+- [x] Camera-ready Option 1 phase 3 completed (signaling lifecycle + reconnect hardening)
+- [x] Camera-ready Option 1 phase 4 completed (file-backed HLS playlists/segments)
+- [x] Camera-ready Option 1 phase 5 completed (persistence + first-boot setup)
+- [x] Camera-ready Option 1 phase 6 completed (diagnostics + pipeline restart controls)
+- [x] Camera-ready Option 1 phase 7 completed (release checklist + runbook updates; Option 2 deferred TODO)
 
 Commit trail:
 - `76253ee` bootstrap

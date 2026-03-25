@@ -61,3 +61,7 @@ Finalize a release candidate for camera-arrival day and explicitly park Hub/Node
 ## Exit Artifacts
 - Camera-arrival-ready software release and checklist evidence.
 - Hub/node TODO roadmap documented and visible.
+
+## Implementation Output
+- Release checklist file: `plans/camera_ready/phase_7_release_checklist.md`
+- Option 2 remains explicitly deferred and tracked as TODO items above.
