@@ -3,6 +3,7 @@ defmodule NervesView.Pipeline.Runtime.FramePublisher do
 
   use GenServer
 
+  alias NervesView.Camera.Producer
   alias NervesView.Pipeline.StreamBus
 
   @tick_ms 33
@@ -14,13 +15,21 @@ defmodule NervesView.Pipeline.Runtime.FramePublisher do
   @impl true
   def init(opts) do
     camera_id = Keyword.fetch!(opts, :camera_id)
+    source_type = Keyword.get(opts, :source_type, :synthetic)
+    source_path = Keyword.get(opts, :source_path, "synthetic://pattern")
+
+    producer_module = Producer.module_for(source_type)
+
+    {:ok, producer_pid} =
+      producer_module.start_link(source_type: source_type, source_path: source_path)
+
     Process.send_after(self(), :tick, @tick_ms)
 
     {:ok,
      %{
        camera_id: camera_id,
-       sequence: 0,
-       timestamp: 0,
+       producer_module: producer_module,
+       producer_pid: producer_pid,
        started_at: System.system_time(:second),
        last_frame_at: System.system_time(:second)
      }}
@@ -28,22 +37,35 @@ defmodule NervesView.Pipeline.Runtime.FramePublisher do
 
   @impl true
   def handle_info(:tick, state) do
-    frame = %{
-      payload: <<0, 0, 1, 101, 0, 0, 0, 1>>,
-      sequence_number: state.sequence,
-      timestamp: state.timestamp,
-      inserted_at: System.system_time(:second)
-    }
+    snapshot = state.producer_module.snapshot(state.producer_pid)
+
+    frame =
+      if snapshot.healthy do
+        %{
+          payload: snapshot.payload,
+          sequence_number: snapshot.sequence,
+          timestamp: snapshot.timestamp,
+          inserted_at: System.system_time(:second)
+        }
+      else
+        %{
+          payload: <<0, 0, 1, 101, 0, 0, 0, 0>>,
+          sequence_number: 0,
+          timestamp: 0,
+          inserted_at: System.system_time(:second),
+          error: snapshot.last_error
+        }
+      end
 
     StreamBus.publish(state.camera_id, frame)
     Process.send_after(self(), :tick, @tick_ms)
 
-    {:noreply,
-     %{
-       state
-       | sequence: rem(state.sequence + 1, 65_535),
-         timestamp: rem(state.timestamp + 3_000, 4_294_967_295),
-         last_frame_at: System.system_time(:second)
-     }}
+    {:noreply, %{state | last_frame_at: System.system_time(:second)}}
+  end
+
+  @impl true
+  def terminate(_reason, state) do
+    state.producer_module.stop(state.producer_pid)
+    :ok
   end
 end

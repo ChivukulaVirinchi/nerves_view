@@ -15,7 +15,13 @@ defmodule NervesView.Pipeline.Runtime.Host do
         start_ts = System.system_time(:second)
 
         {:ok, pid} = TestSource.start_link(frame_count: frame_count, interval_ms: interval_ms)
-        {:ok, publisher_pid} = FramePublisher.start_link(camera_id: camera_id)
+
+        {:ok, publisher_pid} =
+          FramePublisher.start_link(
+            camera_id: camera_id,
+            source_type: :synthetic,
+            source_path: "synthetic://host"
+          )
 
         {:ok,
          descriptor

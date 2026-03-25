@@ -13,7 +13,12 @@ defmodule NervesView.Pipeline.Runtime.Target do
       when is_binary(path) and path != "" ->
         with :ok <- validate_source(source_type, path),
              {:ok, pid} <- TargetWorker.start_link(source_type: source_type, source_path: path),
-             {:ok, publisher_pid} <- FramePublisher.start_link(camera_id: descriptor.camera_id) do
+             {:ok, publisher_pid} <-
+               FramePublisher.start_link(
+                 camera_id: descriptor.camera_id,
+                 source_type: source_type,
+                 source_path: path
+               ) do
           snapshot = TargetWorker.snapshot(pid)
 
           {:ok,
