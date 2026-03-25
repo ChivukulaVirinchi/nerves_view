@@ -4,6 +4,7 @@ defmodule NervesView.Pipeline.HLSWriter do
   """
 
   alias NervesView.Recording.Store
+  alias NervesView.Pipeline.Manager
 
   @default_base_dir "tmp/recordings"
 
@@ -23,7 +24,19 @@ defmodule NervesView.Pipeline.HLSWriter do
 
     :ok = File.mkdir_p(dir)
     variant = Keyword.get(opts, :variant, :simulated)
-    Enum.each(segment_paths, &write_segment_file(&1, camera_id, rec_id, variant))
+    frame_count = Keyword.get(opts, :frame_count, 30)
+
+    _ =
+      case Manager.status(camera_id) do
+        {:ok, _status} ->
+          :ok
+
+        {:error, :not_found} ->
+          Manager.start_pipeline(camera_id, frame_count: 120, interval_ms: 33)
+      end
+
+    frame_payload = collect_frame_payload(camera_id, frame_count)
+    Enum.each(segment_paths, &write_segment_file(&1, camera_id, rec_id, variant, frame_payload))
     :ok = write_playlist_file(playlist_path, segment_paths, segment_duration)
 
     size_bytes =
@@ -50,9 +63,30 @@ defmodule NervesView.Pipeline.HLSWriter do
     Store.put(recording)
   end
 
-  defp write_segment_file(path, camera_id, rec_id, variant) do
-    content = "NervesView segment camera=#{camera_id} recording=#{rec_id} variant=#{variant}\n"
+  defp write_segment_file(path, camera_id, rec_id, variant, frame_payload) do
+    content =
+      "NervesView segment camera=#{camera_id} recording=#{rec_id} variant=#{variant} frame=#{frame_payload}\n"
+
     :ok = File.write(path, content)
+  end
+
+  defp collect_frame_payload(camera_id, count) do
+    :ok = NervesView.Pipeline.StreamBus.subscribe(camera_id)
+
+    payload =
+      1..count
+      |> Enum.reduce_while(nil, fn _i, _acc ->
+        receive do
+          {:pipeline_frame, ^camera_id, frame} ->
+            value = Base.encode16(Map.get(frame, :payload, <<>>), case: :lower)
+            {:halt, value}
+        after
+          100 -> {:cont, nil}
+        end
+      end)
+
+    :ok = NervesView.Pipeline.StreamBus.unsubscribe(camera_id)
+    payload || "none"
   end
 
   defp write_playlist_file(playlist_path, segment_paths, segment_duration) do

@@ -10,10 +10,10 @@ defmodule NervesView.Streaming.PeerConnection do
   alias ExWebRTC.MediaStreamTrack
   alias ExWebRTC.PeerConnection, as: WebRTCPeer
   alias ExWebRTC.SessionDescription
+  alias NervesView.Pipeline.StreamBus
 
   @type role :: :viewer | :publisher
   @timeout_seconds 45
-  @rtp_tick_ms 33
 
   def start_link(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
@@ -53,8 +53,6 @@ defmodule NervesView.Streaming.PeerConnection do
       timeout_at: now + @timeout_seconds,
       pc: pc,
       sender_track_id: nil,
-      seq_no: 0,
-      ts: 0,
       inserted_at: now,
       updated_at: now
     }
@@ -151,6 +149,7 @@ defmodule NervesView.Streaming.PeerConnection do
   end
 
   def handle_call({:close, reason}, _from, state) do
+    _ = StreamBus.unsubscribe(state.camera_id)
     _ = WebRTCPeer.close(state.pc)
 
     next = %{
@@ -177,7 +176,7 @@ defmodule NervesView.Streaming.PeerConnection do
   end
 
   def handle_info({:ex_webrtc, _from, {:connection_state_change, :connected}}, state) do
-    Process.send_after(self(), :send_rtp_tick, @rtp_tick_ms)
+    :ok = StreamBus.subscribe(state.camera_id)
 
     {:noreply,
      %{state | state: :connected, state_reason: nil, updated_at: System.system_time(:second)}}
@@ -187,25 +186,23 @@ defmodule NervesView.Streaming.PeerConnection do
     {:noreply, %{state | state_reason: conn_state, updated_at: System.system_time(:second)}}
   end
 
-  def handle_info(:send_rtp_tick, %{state: :connected, sender_track_id: track_id} = state)
-      when is_integer(track_id) do
-    packet =
-      Packet.new(<<0, 0, 1, 101, 0, 0, 0, 1>>, sequence_number: state.seq_no, timestamp: state.ts)
+  def handle_info({:pipeline_frame, camera_id, frame}, %{camera_id: camera_id} = state) do
+    with true <- state.state == :connected,
+         track_id when is_integer(track_id) <- state.sender_track_id,
+         payload when is_binary(payload) <- Map.get(frame, :payload) do
+      packet =
+        Packet.new(payload,
+          sequence_number: Map.get(frame, :sequence_number, 0),
+          timestamp: Map.get(frame, :timestamp, 0)
+        )
 
-    _ = WebRTCPeer.send_rtp(state.pc, track_id, packet)
-
-    Process.send_after(self(), :send_rtp_tick, @rtp_tick_ms)
-
-    {:noreply,
-     %{
-       state
-       | seq_no: rem(state.seq_no + 1, 65_535),
-         ts: rem(state.ts + 3_000, 4_294_967_295),
-         updated_at: System.system_time(:second)
-     }}
+      _ = WebRTCPeer.send_rtp(state.pc, track_id, packet)
+      {:noreply, %{state | updated_at: System.system_time(:second)}}
+    else
+      _ -> {:noreply, state}
+    end
   end
 
-  def handle_info(:send_rtp_tick, state), do: {:noreply, state}
   def handle_info(_, state), do: {:noreply, state}
 
   defp ensure_sender_track(%{sender_track_id: track_id} = state) when is_integer(track_id),
@@ -236,4 +233,11 @@ defmodule NervesView.Streaming.PeerConnection do
   defp maybe_add_ice_candidate(_pc, _candidate), do: :ok
 
   defp via(session_id), do: {:via, Registry, {NervesView.Streaming.Registry, session_id}}
+
+  @impl true
+  def terminate(_reason, state) do
+    _ = StreamBus.unsubscribe(state.camera_id)
+    _ = WebRTCPeer.close(state.pc)
+    :ok
+  end
 end

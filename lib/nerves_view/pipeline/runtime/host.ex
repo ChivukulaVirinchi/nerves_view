@@ -3,6 +3,7 @@ defmodule NervesView.Pipeline.Runtime.Host do
 
   @behaviour NervesView.Pipeline.Runtime
 
+  alias NervesView.Pipeline.Runtime.FramePublisher
   alias NervesView.Pipeline.TestSource
 
   @impl true
@@ -14,10 +15,11 @@ defmodule NervesView.Pipeline.Runtime.Host do
         start_ts = System.system_time(:second)
 
         {:ok, pid} = TestSource.start_link(frame_count: frame_count, interval_ms: interval_ms)
+        {:ok, publisher_pid} = FramePublisher.start_link(camera_id: camera_id)
 
         {:ok,
          descriptor
-         |> Map.put(:runtime, %{module: __MODULE__, source_pid: pid})
+         |> Map.put(:runtime, %{module: __MODULE__, source_pid: pid, publisher_pid: publisher_pid})
          |> Map.put(:status, :running)
          |> Map.put(:started_at, start_ts)
          |> Map.put(:last_frame_at, start_ts)}
@@ -28,6 +30,13 @@ defmodule NervesView.Pipeline.Runtime.Host do
   end
 
   @impl true
+  def stop_pipeline(%{runtime: %{source_pid: pid, publisher_pid: publisher_pid}})
+      when is_pid(pid) and is_pid(publisher_pid) do
+    if Process.alive?(pid), do: Process.exit(pid, :normal)
+    if Process.alive?(publisher_pid), do: Process.exit(publisher_pid, :normal)
+    :ok
+  end
+
   def stop_pipeline(%{runtime: %{source_pid: pid}}) when is_pid(pid) do
     if Process.alive?(pid), do: Process.exit(pid, :normal)
     :ok

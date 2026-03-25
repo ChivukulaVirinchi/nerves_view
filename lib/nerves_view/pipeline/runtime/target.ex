@@ -3,6 +3,7 @@ defmodule NervesView.Pipeline.Runtime.Target do
 
   @behaviour NervesView.Pipeline.Runtime
 
+  alias NervesView.Pipeline.Runtime.FramePublisher
   alias NervesView.Pipeline.Runtime.TargetWorker
 
   @impl true
@@ -11,12 +12,18 @@ defmodule NervesView.Pipeline.Runtime.Target do
       %{source: %{device_path: path}, source_type: source_type}
       when is_binary(path) and path != "" ->
         with :ok <- validate_source(source_type, path),
-             {:ok, pid} <- TargetWorker.start_link(source_type: source_type, source_path: path) do
+             {:ok, pid} <- TargetWorker.start_link(source_type: source_type, source_path: path),
+             {:ok, publisher_pid} <- FramePublisher.start_link(camera_id: descriptor.camera_id) do
           snapshot = TargetWorker.snapshot(pid)
 
           {:ok,
            descriptor
-           |> Map.put(:runtime, %{module: __MODULE__, worker_pid: pid, source_path: path})
+           |> Map.put(:runtime, %{
+             module: __MODULE__,
+             worker_pid: pid,
+             publisher_pid: publisher_pid,
+             source_path: path
+           })
            |> Map.put(:status, :running)
            |> Map.put(:started_at, snapshot.started_at)
            |> Map.put(:last_frame_at, snapshot.last_frame_at)
@@ -33,6 +40,13 @@ defmodule NervesView.Pipeline.Runtime.Target do
   end
 
   @impl true
+  def stop_pipeline(%{runtime: %{worker_pid: pid, publisher_pid: publisher_pid}})
+      when is_pid(pid) and is_pid(publisher_pid) do
+    if Process.alive?(pid), do: GenServer.stop(pid, :normal)
+    if Process.alive?(publisher_pid), do: Process.exit(publisher_pid, :normal)
+    :ok
+  end
+
   def stop_pipeline(%{runtime: %{worker_pid: pid}}) when is_pid(pid) do
     if Process.alive?(pid), do: GenServer.stop(pid, :normal)
     :ok

@@ -18,6 +18,7 @@ defmodule NervesView.Application do
 
         # Shared runtime services
         {NervesView.Camera.Registry, []},
+        {NervesView.Pipeline.StreamBus, []},
         {NervesView.Pipeline.Manager, []},
         {NervesView.Streaming.Signaling, []},
         {NervesView.Recording.Store, []},
