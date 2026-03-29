@@ -24,19 +24,22 @@ defmodule NervesView.Pipeline.Runtime.FramePublisher do
 
     producer_module = Producer.module_for(source_type)
 
-    {:ok, producer_pid} =
-      producer_module.start_link(source_type: source_type, source_path: source_path)
+    case producer_module.start_link(source_type: source_type, source_path: source_path) do
+      {:ok, producer_pid} ->
+        Process.send_after(self(), :tick, @tick_ms)
 
-    Process.send_after(self(), :tick, @tick_ms)
+        {:ok,
+         %{
+           camera_id: camera_id,
+           producer_module: producer_module,
+           producer_pid: producer_pid,
+           started_at: System.system_time(:second),
+           last_frame_at: System.system_time(:second)
+         }}
 
-    {:ok,
-     %{
-       camera_id: camera_id,
-       producer_module: producer_module,
-       producer_pid: producer_pid,
-       started_at: System.system_time(:second),
-       last_frame_at: System.system_time(:second)
-     }}
+      {:error, reason} ->
+        {:stop, reason}
+    end
   end
 
   @impl true

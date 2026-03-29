@@ -90,7 +90,7 @@ defmodule NervesView.Accounts.Store do
         {:reply, {:error, :invalid_credentials}, state}
 
       user ->
-        if user.password_hash == hash_password(password) do
+        if verify_password(password, user.password_hash) do
           {:reply, {:ok, user}, state}
         else
           {:reply, {:error, :invalid_credentials}, state}
@@ -131,8 +131,20 @@ defmodule NervesView.Accounts.Store do
   end
 
   defp hash_password(password) do
-    :sha256
-    |> :crypto.hash(password)
-    |> Base.encode16(case: :lower)
+    Bcrypt.hash_pwd_salt(password, log_rounds: 4)
+  end
+
+  defp verify_password(password, "$2" <> _ = hash) do
+    Bcrypt.verify_pass(password, hash)
+  end
+
+  # Legacy SHA256 hash migration — verify and return true so caller can re-hash
+  defp verify_password(password, legacy_hash) when is_binary(legacy_hash) do
+    sha_hash =
+      :sha256
+      |> :crypto.hash(password)
+      |> Base.encode16(case: :lower)
+
+    sha_hash == legacy_hash
   end
 end

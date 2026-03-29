@@ -9,12 +9,16 @@ defmodule NervesViewWeb.DashboardLive do
 
     Enum.each(NervesView.list_cameras(), &NervesView.start_camera_pipeline(&1.id))
 
+    stream_token =
+      Phoenix.Token.sign(NervesViewWeb.Endpoint, "webrtc_stream", socket.assigns.current_user.id)
+
     {:ok,
      socket
      |> assign(page_title: "Dashboard")
      |> assign(cameras: NervesView.list_cameras())
      |> assign(diagnostics: diagnostics_by_id())
      |> assign(last_motion: %{})
+     |> assign(stream_token: stream_token)
      |> assign(grid_layout: 4)}
   end
 
@@ -52,6 +56,7 @@ defmodule NervesViewWeb.DashboardLive do
               phx-hook="WebRTCPlayer"
               data-camera-id={camera.id}
               data-viewer-id={"viewer-#{@current_user.id}"}
+              data-stream-token={@stream_token}
             ></video>
             <p>ID: {camera.id}</p>
             <p>Status: {camera.status}</p>

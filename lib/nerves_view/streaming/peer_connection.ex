@@ -15,6 +15,8 @@ defmodule NervesView.Streaming.PeerConnection do
   @type role :: :viewer | :publisher
   @timeout_seconds 45
   @max_mailbox_len 30
+  # Max RTP payload size (leaving room for IP/UDP/RTP headers)
+  @max_rtp_payload 1200
 
   def start_link(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
@@ -54,6 +56,8 @@ defmodule NervesView.Streaming.PeerConnection do
       timeout_at: now + @timeout_seconds,
       pc: pc,
       sender_track_id: nil,
+      rtp_sequence: 0,
+      rtp_timestamp: 0,
       inserted_at: now,
       updated_at: now
     }
@@ -193,21 +197,74 @@ defmodule NervesView.Streaming.PeerConnection do
     with true <- qlen < @max_mailbox_len,
          true <- state.state == :connected,
          track_id when is_integer(track_id) <- state.sender_track_id,
-         payload when is_binary(payload) <- Map.get(frame, :payload) do
-      packet =
-        Packet.new(payload,
-          sequence_number: Map.get(frame, :sequence_number, 0),
-          timestamp: Map.get(frame, :timestamp, 0)
-        )
+         payload when is_binary(payload) and payload != <<>> <- Map.get(frame, :payload) do
+      # Advance RTP timestamp by 90kHz/fps ticks per frame (3000 for 30fps, 6000 for 15fps)
+      ts = rem(state.rtp_timestamp + 6_000, 4_294_967_296)
+      {seq, packets} = packetize_h264_nal(payload, state.rtp_sequence, ts)
 
-      _ = WebRTCPeer.send_rtp(state.pc, track_id, packet)
-      {:noreply, %{state | updated_at: System.system_time(:second)}}
+      Enum.each(packets, fn pkt ->
+        _ = WebRTCPeer.send_rtp(state.pc, track_id, pkt)
+      end)
+
+      {:noreply,
+       %{state | rtp_sequence: seq, rtp_timestamp: ts, updated_at: System.system_time(:second)}}
     else
       _ -> {:noreply, state}
     end
   end
 
   def handle_info(_, state), do: {:noreply, state}
+
+  # H.264 RTP packetization (RFC 6184)
+  # Small NALs (< MTU): single NAL unit packet — NAL bytes are the RTP payload directly
+  # Large NALs (>= MTU): FU-A fragmentation — split into fragments with FU indicator + FU header
+  defp packetize_h264_nal(nal, seq, timestamp) when byte_size(nal) <= @max_rtp_payload do
+    next_seq = rem(seq + 1, 65_536)
+    pkt = Packet.new(nal, sequence_number: seq, timestamp: timestamp, marker: true)
+    {next_seq, [pkt]}
+  end
+
+  defp packetize_h264_nal(nal, seq, timestamp) do
+    <<_f::1, nri::2, nal_type::5, nal_body::binary>> = nal
+    # FU indicator: F=0, NRI from original NAL, Type=28 (FU-A)
+    fu_indicator = <<0::1, nri::2, 28::5>>
+    # Max fragment payload = MTU - FU indicator (1 byte) - FU header (1 byte)
+    max_frag = @max_rtp_payload - 2
+    fragments = chunk_binary(nal_body, max_frag)
+
+    {final_seq, packets} =
+      fragments
+      |> Enum.with_index()
+      |> Enum.reduce({seq, []}, fn {frag, idx}, {cur_seq, acc} ->
+        is_first = idx == 0
+        is_last = idx == length(fragments) - 1
+
+        s = if is_first, do: 1, else: 0
+        e = if is_last, do: 1, else: 0
+        fu_header = <<s::1, e::1, 0::1, nal_type::5>>
+
+        payload = fu_indicator <> fu_header <> frag
+        pkt = Packet.new(payload, sequence_number: cur_seq, timestamp: timestamp, marker: is_last)
+        {rem(cur_seq + 1, 65_536), [pkt | acc]}
+      end)
+
+    {final_seq, Enum.reverse(packets)}
+  end
+
+  defp chunk_binary(bin, chunk_size) do
+    chunk_binary(bin, chunk_size, [])
+  end
+
+  defp chunk_binary(<<>>, _chunk_size, acc), do: Enum.reverse(acc)
+
+  defp chunk_binary(bin, chunk_size, acc) when byte_size(bin) <= chunk_size do
+    Enum.reverse([bin | acc])
+  end
+
+  defp chunk_binary(bin, chunk_size, acc) do
+    <<chunk::binary-size(chunk_size), rest::binary>> = bin
+    chunk_binary(rest, chunk_size, [chunk | acc])
+  end
 
   defp ensure_sender_track(%{sender_track_id: track_id} = state) when is_integer(track_id),
     do: {:ok, state}

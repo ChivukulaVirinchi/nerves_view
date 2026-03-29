@@ -24,7 +24,6 @@ defmodule NervesViewWeb.RecordingsLiveTest do
 
     conn = get(conn, ~p"/recordings")
     html = html_response(conn, 200)
-    assert html =~ "HLS recording browser"
-    assert html =~ "playlist.m3u8"
+    assert html =~ "No recordings yet"
   end
 end

@@ -65,6 +65,7 @@ defmodule NervesView.MixProject do
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
       {:bandit, "~> 1.5"},
       {:gettext, "~> 0.26"},
+      {:bcrypt_elixir, "~> 3.0"},
       {:ex_webrtc, "~> 0.14"},
       {:ex_ice, "~> 0.7"},
       {:libcluster, "~> 3.3"},

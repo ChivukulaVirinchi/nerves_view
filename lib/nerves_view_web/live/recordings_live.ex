@@ -3,10 +3,6 @@ defmodule NervesViewWeb.RecordingsLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    if NervesView.list_recordings() == [] do
-      :ok = seed_recordings()
-    end
-
     {:ok,
      socket
      |> assign(page_title: "Recordings")
@@ -19,7 +15,6 @@ defmodule NervesViewWeb.RecordingsLive do
     ~H"""
     <section>
       <h1>Recordings</h1>
-      <p class="muted">HLS recording browser (Phase 12 scaffold).</p>
       <p class="muted">Total recordings: {@storage.recording_count}, bytes: {@storage.total_bytes}</p>
 
       <div class="card-list">
@@ -41,26 +36,5 @@ defmodule NervesViewWeb.RecordingsLive do
       </div>
     </section>
     """
-  end
-
-  defp seed_recordings do
-    with {:ok, _} <-
-           NervesView.register_camera(%{
-             id: "rec-cam",
-             name: "Rec Cam",
-             source_type: :libcamera,
-             status: :streaming
-           }),
-         {:ok, _} <-
-           NervesView.Pipeline.HLSWriter.write("rec-cam", mode: :motion, variant: :live_path),
-         {:ok, _} <-
-           NervesView.Pipeline.HLSWriter.write("rec-cam",
-             now: System.system_time(:second) + 30,
-             variant: :live_path
-           ) do
-      :ok
-    else
-      _ -> :ok
-    end
   end
 end

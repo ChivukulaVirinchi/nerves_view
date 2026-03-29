@@ -1,11 +1,19 @@
 defmodule NervesView.Camera.Producer.Libcamera do
-  @moduledoc false
+  @moduledoc """
+  Captures H.264 frames from libcamera-vid via Port.
+
+  Accumulates the raw bytestream and splits on NAL unit start codes
+  (0x00000001 or 0x000001) to extract individual access units.
+  """
 
   use GenServer
 
   @behaviour NervesView.Camera.Producer
   @tick_ms 33
-  @max_payload 1200
+
+  # H.264 NAL start code patterns
+  @start_code_4 <<0, 0, 0, 1>>
+  @start_code_3 <<0, 0, 1>>
 
   @impl true
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
@@ -40,7 +48,8 @@ defmodule NervesView.Camera.Producer.Libcamera do
          last_error: nil,
          sequence: 0,
          timestamp: 0,
-         payload: <<0, 0, 1, 101, 0, 0, 0, 1>>,
+         payload: <<>>,
+         buffer: <<>>,
          port: port,
          exec: exec
        }}
@@ -67,24 +76,30 @@ defmodule NervesView.Camera.Producer.Libcamera do
   end
 
   def handle_info({port, {:data, data}}, %{port: port} = state) when is_binary(data) do
-    payload = normalize_payload(data)
+    buffer = state.buffer <> data
 
-    next =
-      if payload == <<>> do
-        state
-      else
-        %{
-          state
-          | payload: payload,
-            sequence: rem(state.sequence + 1, 65_535),
-            timestamp: rem(state.timestamp + 3_000, 4_294_967_295),
-            last_frame_at: System.system_time(:second),
-            healthy: true,
-            last_error: nil
-        }
-      end
+    case extract_nal_units(buffer) do
+      {[], rest} ->
+        # No complete NAL yet, keep buffering (cap buffer at 256KB to prevent OOM)
+        capped = if byte_size(rest) > 262_144, do: <<>>, else: rest
+        {:noreply, %{state | buffer: capped, healthy: true, last_error: nil}}
 
-    {:noreply, next}
+      {nal_units, rest} ->
+        # Take the latest complete NAL unit as the current frame payload
+        latest_nal = List.last(nal_units)
+
+        {:noreply,
+         %{
+           state
+           | payload: latest_nal,
+             buffer: rest,
+             sequence: rem(state.sequence + 1, 65_535),
+             timestamp: rem(state.timestamp + 3_000, 4_294_967_295),
+             last_frame_at: System.system_time(:second),
+             healthy: true,
+             last_error: nil
+         }}
+    end
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
@@ -93,8 +108,67 @@ defmodule NervesView.Camera.Producer.Libcamera do
 
   @impl true
   def terminate(_reason, state) do
-    if is_port(state[:port]), do: Port.close(state.port)
+    if is_port(state[:port]) and Port.info(state.port) != nil do
+      Port.close(state.port)
+    end
+
     :ok
+  end
+
+  # Split a binary buffer into complete NAL units.
+  # Returns {completed_nal_units, remaining_buffer}.
+  defp extract_nal_units(buffer) do
+    case find_start_codes(buffer) do
+      [] ->
+        {[], buffer}
+
+      [_single] ->
+        # Only one start code found — NAL not yet complete
+        {[], buffer}
+
+      positions ->
+        # Extract NAL units between consecutive start code positions
+        pairs = Enum.zip(positions, tl(positions))
+
+        nals =
+          Enum.map(pairs, fn {{pos1, len1}, {pos2, _len2}} ->
+            nal_start = pos1 + len1
+            nal_len = pos2 - nal_start
+            if nal_len > 0, do: :binary.part(buffer, nal_start, nal_len), else: nil
+          end)
+          |> Enum.reject(&is_nil/1)
+
+        # Keep everything from the last start code onward as the remaining buffer
+        {last_pos, _last_len} = List.last(positions)
+        rest = :binary.part(buffer, last_pos, byte_size(buffer) - last_pos)
+
+        {nals, rest}
+    end
+  end
+
+  # Find all NAL start code positions in the buffer.
+  # Returns list of {byte_offset, start_code_length} tuples.
+  defp find_start_codes(buffer) do
+    find_start_codes(buffer, 0, [])
+  end
+
+  defp find_start_codes(buffer, offset, acc) when offset >= byte_size(buffer) - 2 do
+    Enum.reverse(acc)
+  end
+
+  defp find_start_codes(buffer, offset, acc) do
+    cond do
+      offset <= byte_size(buffer) - 4 &&
+          :binary.part(buffer, offset, 4) == @start_code_4 ->
+        find_start_codes(buffer, offset + 4, [{offset, 4} | acc])
+
+      offset <= byte_size(buffer) - 3 &&
+          :binary.part(buffer, offset, 3) == @start_code_3 ->
+        find_start_codes(buffer, offset + 3, [{offset, 3} | acc])
+
+      true ->
+        find_start_codes(buffer, offset + 1, acc)
+    end
   end
 
   defp kill_orphaned_libcamera_vid do
@@ -134,20 +208,11 @@ defmodule NervesView.Camera.Producer.Libcamera do
         :binary,
         :use_stdio,
         :exit_status,
-        :stderr_to_stdout,
         args: args
       ])
 
     {:ok, port}
   rescue
     _ -> {:error, :libcamera_port_open_failed}
-  end
-
-  defp normalize_payload(data) do
-    if byte_size(data) > @max_payload do
-      :binary.part(data, 0, @max_payload)
-    else
-      data
-    end
   end
 end

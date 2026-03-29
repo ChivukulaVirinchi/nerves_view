@@ -5,12 +5,21 @@ defmodule NervesViewWeb.WebRTCController do
   alias NervesView.Streaming.MediaBridge
   alias NervesView.Streaming.Signaling
 
-  def offer(conn, %{"camera_id" => camera_id, "viewer_id" => viewer_id}) do
-    with {:ok, _camera} <- Registry.get(camera_id),
+  # Token valid for 5 minutes
+  @token_max_age 300
+
+  def offer(conn, %{"camera_id" => camera_id, "viewer_id" => viewer_id, "token" => token}) do
+    with {:ok, _user_id} <- verify_stream_token(token),
+         {:ok, _camera} <- Registry.get(camera_id),
          {:ok, session_id, offer_sdp} <-
            Signaling.create_offer(camera_id, viewer_id, MediaBridge.offer_sdp(camera_id)) do
       json(conn, %{session_id: session_id, offer_sdp: offer_sdp})
     else
+      {:error, :invalid_token} ->
+        conn
+        |> put_status(:unauthorized)
+        |> json(%{error: "invalid_or_expired_token"})
+
       {:error, :not_found} ->
         conn
         |> put_status(:not_found)
@@ -26,7 +35,7 @@ defmodule NervesViewWeb.WebRTCController do
   def offer(conn, _params) do
     conn
     |> put_status(:bad_request)
-    |> json(%{error: "camera_id_and_viewer_id_required"})
+    |> json(%{error: "camera_id_viewer_id_and_token_required"})
   end
 
   def answer(conn, %{"session_id" => session_id, "answer_sdp" => answer_sdp}) do
@@ -73,4 +82,15 @@ defmodule NervesViewWeb.WebRTCController do
   defp parse_role("viewer"), do: {:ok, :viewer}
   defp parse_role("publisher"), do: {:ok, :publisher}
   defp parse_role(_), do: {:error, :invalid_role}
+
+  defp verify_stream_token(token) when is_binary(token) do
+    case Phoenix.Token.verify(NervesViewWeb.Endpoint, "webrtc_stream", token,
+           max_age: @token_max_age
+         ) do
+      {:ok, user_id} -> {:ok, user_id}
+      {:error, _reason} -> {:error, :invalid_token}
+    end
+  end
+
+  defp verify_stream_token(_), do: {:error, :invalid_token}
 end

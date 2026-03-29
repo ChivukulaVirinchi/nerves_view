@@ -12,16 +12,15 @@ defmodule NervesView.Pipeline.Runtime.TargetWorkerTest do
     assert snapshot.last_error == nil
   end
 
-  test "frame publisher uses source-specific producer" do
-    assert {:ok, publisher_pid} =
+  test "frame publisher fails for unimplemented source types" do
+    Process.flag(:trap_exit, true)
+
+    assert {:error, :not_implemented} =
              NervesView.Pipeline.Runtime.FramePublisher.start_link(
                camera_id: "cam-local",
                source_type: :rtsp,
                source_path: "rtsp://example.local/stream"
              )
-
-    Process.sleep(50)
-    assert Process.alive?(publisher_pid)
   end
 
   test "rejects invalid rtsp source" do

@@ -20,12 +20,13 @@ const WebRTCPlayer = {
 
     const cameraId = this.el.dataset.cameraId
     const viewerId = this.el.dataset.viewerId || `viewer-${Date.now()}`
+    const streamToken = this.el.dataset.streamToken
 
     try {
       const offerResp = await fetch("/api/webrtc/offer", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ camera_id: cameraId, viewer_id: viewerId }),
+        body: JSON.stringify({ camera_id: cameraId, viewer_id: viewerId, token: streamToken }),
       })
 
       if (!offerResp.ok) throw new Error("offer_failed")

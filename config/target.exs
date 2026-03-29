@@ -111,6 +111,11 @@ config :mdns_lite,
     }
   ]
 
+# Writable data paths — Nerves rootfs is read-only, /data persists across updates
+config :nerves_view,
+  persistence_dir: "/data/nerves_view/persistence",
+  recordings_path: "/data/nerves_view/recordings"
+
 # Import target specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 # Uncomment to use target specific configurations
