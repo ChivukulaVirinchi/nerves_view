@@ -14,6 +14,7 @@ defmodule NervesView.Streaming.PeerConnection do
 
   @type role :: :viewer | :publisher
   @timeout_seconds 45
+  @max_mailbox_len 30
 
   def start_link(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
@@ -187,7 +188,10 @@ defmodule NervesView.Streaming.PeerConnection do
   end
 
   def handle_info({:pipeline_frame, camera_id, frame}, %{camera_id: camera_id} = state) do
-    with true <- state.state == :connected,
+    {:message_queue_len, qlen} = Process.info(self(), :message_queue_len)
+
+    with true <- qlen < @max_mailbox_len,
+         true <- state.state == :connected,
          track_id when is_integer(track_id) <- state.sender_track_id,
          payload when is_binary(payload) <- Map.get(frame, :payload) do
       packet =

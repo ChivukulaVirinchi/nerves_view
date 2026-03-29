@@ -4,7 +4,6 @@ defmodule NervesView.Pipeline.Runtime.Target do
   @behaviour NervesView.Pipeline.Runtime
 
   alias NervesView.Pipeline.Runtime.FramePublisher
-  alias NervesView.Pipeline.Runtime.TargetWorker
 
   @impl true
   def start_pipeline(descriptor, _opts) do
@@ -12,20 +11,18 @@ defmodule NervesView.Pipeline.Runtime.Target do
       %{source: %{device_path: path}, source_type: source_type}
       when is_binary(path) and path != "" ->
         with :ok <- validate_source(source_type, path),
-             {:ok, pid} <- TargetWorker.start_link(source_type: source_type, source_path: path),
              {:ok, publisher_pid} <-
                FramePublisher.start_link(
                  camera_id: descriptor.camera_id,
                  source_type: source_type,
                  source_path: path
                ) do
-          snapshot = TargetWorker.snapshot(pid)
+          snapshot = FramePublisher.snapshot(publisher_pid)
 
           {:ok,
            descriptor
            |> Map.put(:runtime, %{
              module: __MODULE__,
-             worker_pid: pid,
              publisher_pid: publisher_pid,
              source_path: path
            })
@@ -45,25 +42,18 @@ defmodule NervesView.Pipeline.Runtime.Target do
   end
 
   @impl true
-  def stop_pipeline(%{runtime: %{worker_pid: pid, publisher_pid: publisher_pid}})
-      when is_pid(pid) and is_pid(publisher_pid) do
-    if Process.alive?(pid), do: GenServer.stop(pid, :normal)
-    if Process.alive?(publisher_pid), do: Process.exit(publisher_pid, :normal)
-    :ok
-  end
-
-  def stop_pipeline(%{runtime: %{worker_pid: pid}}) when is_pid(pid) do
-    if Process.alive?(pid), do: GenServer.stop(pid, :normal)
+  def stop_pipeline(%{runtime: %{publisher_pid: publisher_pid}}) when is_pid(publisher_pid) do
+    if Process.alive?(publisher_pid), do: GenServer.stop(publisher_pid, :normal)
     :ok
   end
 
   def stop_pipeline(_descriptor), do: :ok
 
   @impl true
-  def health(%{runtime: %{worker_pid: pid, source_path: path}})
+  def health(%{runtime: %{publisher_pid: pid, source_path: path}})
       when is_pid(pid) and is_binary(path) do
     if Process.alive?(pid) do
-      snapshot = TargetWorker.snapshot(pid)
+      snapshot = FramePublisher.snapshot(pid)
 
       %{
         healthy: snapshot.healthy,
@@ -72,7 +62,7 @@ defmodule NervesView.Pipeline.Runtime.Target do
         last_error: snapshot.last_error
       }
     else
-      %{healthy: false, source_path: path, last_error: :worker_down}
+      %{healthy: false, source_path: path, last_error: :publisher_down}
     end
   end
 

@@ -19,9 +19,11 @@ defmodule NervesView.Camera.Producer.Libcamera do
   @impl true
   def init(opts) do
     source_path = Keyword.get(opts, :source_path, "/dev/video0")
-    width = Keyword.get(opts, :width, 1280)
-    height = Keyword.get(opts, :height, 720)
-    fps = Keyword.get(opts, :fps, 30)
+    width = Keyword.get(opts, :width, 640)
+    height = Keyword.get(opts, :height, 480)
+    fps = Keyword.get(opts, :fps, 15)
+
+    kill_orphaned_libcamera_vid()
 
     with {:ok, exec} <- find_libcamera_vid(),
          {:ok, port} <- open_port(exec, width, height, fps) do
@@ -52,19 +54,11 @@ defmodule NervesView.Camera.Producer.Libcamera do
 
   @impl true
   def handle_info(:tick, state) do
-    now = System.system_time(:second)
     Process.send_after(self(), :tick, @tick_ms)
 
     next =
       if File.exists?(state.source_path) do
-        %{
-          state
-          | healthy: true,
-            last_error: nil,
-            last_frame_at: now,
-            sequence: rem(state.sequence + 1, 65_535),
-            timestamp: rem(state.timestamp + 3_000, 4_294_967_295)
-        }
+        %{state | healthy: true, last_error: nil}
       else
         %{state | healthy: false, last_error: :device_not_found}
       end
@@ -101,6 +95,14 @@ defmodule NervesView.Camera.Producer.Libcamera do
   def terminate(_reason, state) do
     if is_port(state[:port]), do: Port.close(state.port)
     :ok
+  end
+
+  defp kill_orphaned_libcamera_vid do
+    case System.cmd("pkill", ["-f", "libcamera-vid"], stderr_to_stdout: true) do
+      {_, _} -> :ok
+    end
+
+    Process.sleep(100)
   end
 
   defp find_libcamera_vid do

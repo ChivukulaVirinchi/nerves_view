@@ -32,7 +32,6 @@ defmodule NervesViewWeb.WebRTCController do
   def answer(conn, %{"session_id" => session_id, "answer_sdp" => answer_sdp}) do
     case Signaling.apply_answer(session_id, answer_sdp) do
       :ok ->
-        :ok = Signaling.mark_connected(session_id)
         json(conn, %{ok: true})
 
       {:error, :not_found} ->

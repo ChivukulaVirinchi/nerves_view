@@ -15,5 +15,3 @@ if config_env() == :prod do
     http: [ip: {0, 0, 0, 0}, port: port],
     secret_key_base: secret_key_base
 end
-
-config :nerves_view, NervesViewWeb.Endpoint, force_ssl: [hsts: true]

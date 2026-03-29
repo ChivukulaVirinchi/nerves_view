@@ -9,6 +9,7 @@ defmodule NervesView.Streaming.Signaling do
   alias NervesView.Streaming.PeerManager
 
   @name __MODULE__
+  @reap_interval_ms 30_000
 
   @type session :: %{
           required(:camera_id) => String.t(),
@@ -82,7 +83,28 @@ defmodule NervesView.Streaming.Signaling do
   end
 
   @impl true
-  def init(state), do: {:ok, state}
+  def init(state) do
+    Process.send_after(self(), :reap, @reap_interval_ms)
+    {:ok, state}
+  end
+
+  @impl true
+  def handle_info(:reap, state) do
+    now_ts = System.system_time(:second)
+
+    expired_ids =
+      state
+      |> Enum.filter(fn {_id, session} ->
+        session.timeout_at <= now_ts and session.state != :connected
+      end)
+      |> Enum.map(fn {id, _session} -> id end)
+
+    Enum.each(expired_ids, &PeerManager.stop_session/1)
+    next_state = Enum.reduce(expired_ids, state, &Map.delete(&2, &1))
+
+    Process.send_after(self(), :reap, @reap_interval_ms)
+    {:noreply, next_state}
+  end
 
   @impl true
   def handle_call({:create_session, camera_id, viewer_id}, _from, state) do

@@ -8,9 +8,10 @@ defmodule NervesView.Pipeline.Camera do
   @spec build(map(), keyword()) :: {:ok, map()} | {:error, atom()}
   def build(camera, opts \\ []) when is_map(camera) do
     with {:ok, normalized} <- Source.normalize(camera) do
-      resolution = Keyword.get(opts, :resolution, {1280, 720})
-      fps = Keyword.get(opts, :fps, 30)
-      bitrate = Keyword.get(opts, :bitrate, 2_000_000)
+      {def_w, def_h, def_fps, def_bitrate} = default_stream_params()
+      resolution = Keyword.get(opts, :resolution, {def_w, def_h})
+      fps = Keyword.get(opts, :fps, def_fps)
+      bitrate = Keyword.get(opts, :bitrate, def_bitrate)
 
       {:ok,
        %{
@@ -22,6 +23,15 @@ defmodule NervesView.Pipeline.Camera do
          outputs: %{webrtc: true, motion_detector: true},
          stream: %{resolution: resolution, fps: fps}
        }}
+    end
+  end
+
+  @is_host Mix.target() == :host
+  defp default_stream_params do
+    if @is_host do
+      {1280, 720, 30, 2_000_000}
+    else
+      {640, 480, 15, 800_000}
     end
   end
 end

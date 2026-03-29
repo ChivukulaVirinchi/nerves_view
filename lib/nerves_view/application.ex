@@ -16,11 +16,23 @@ defmodule NervesView.Application do
         {Registry, keys: :unique, name: NervesView.Streaming.Registry},
         {NervesView.Streaming.PeerSupervisor, []},
 
-        # Shared runtime services
-        {NervesView.Camera.Registry, []},
-        {NervesView.Pipeline.StreamBus, []},
-        {NervesView.Pipeline.Manager, []},
-        {NervesView.Streaming.Signaling, []},
+        # Pipeline services — rest_for_one ensures downstream processes restart
+        # if an upstream dependency (e.g., StreamBus) crashes.
+        %{
+          id: NervesView.PipelineSupervisor,
+          type: :supervisor,
+          start:
+            {Supervisor, :start_link,
+             [
+               [
+                 {NervesView.Camera.Registry, []},
+                 {NervesView.Pipeline.StreamBus, []},
+                 {NervesView.Pipeline.Manager, []},
+                 {NervesView.Streaming.Signaling, []}
+               ],
+               [strategy: :rest_for_one, name: NervesView.PipelineSupervisor]
+             ]}
+        },
         {NervesView.Recording.Store, []},
         {NervesView.Storage.Manager, []},
         {NervesView.Security.RateLimiter, []},

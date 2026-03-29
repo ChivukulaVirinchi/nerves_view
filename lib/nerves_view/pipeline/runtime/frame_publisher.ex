@@ -12,6 +12,10 @@ defmodule NervesView.Pipeline.Runtime.FramePublisher do
     GenServer.start_link(__MODULE__, opts)
   end
 
+  def snapshot(pid) when is_pid(pid) do
+    GenServer.call(pid, :snapshot)
+  end
+
   @impl true
   def init(opts) do
     camera_id = Keyword.fetch!(opts, :camera_id)
@@ -33,6 +37,20 @@ defmodule NervesView.Pipeline.Runtime.FramePublisher do
        started_at: System.system_time(:second),
        last_frame_at: System.system_time(:second)
      }}
+  end
+
+  @impl true
+  def handle_call(:snapshot, _from, state) do
+    producer_snapshot = state.producer_module.snapshot(state.producer_pid)
+
+    reply = %{
+      healthy: producer_snapshot.healthy,
+      last_frame_at: state.last_frame_at,
+      last_error: producer_snapshot.last_error,
+      started_at: state.started_at
+    }
+
+    {:reply, reply, state}
   end
 
   @impl true
