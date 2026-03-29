@@ -45,8 +45,26 @@ config :nerves_ssh,
 # Update regulatory_domain to your 2-letter country code E.g., "US"
 #
 # See https://github.com/nerves-networking/vintage_net for more information
+wifi_ssid = System.get_env("NERVES_WIFI_SSID") || "Redmi Note 11S"
+wifi_psk = System.get_env("NERVES_WIFI_PSK") || "gurujada"
+
+wifi_config =
+  if wifi_ssid != "" and wifi_psk != "" do
+    %{
+      type: VintageNetWiFi,
+      ipv4: %{method: :dhcp},
+      vintage_net_wifi: %{
+        networks: [
+          %{ssid: wifi_ssid, psk: wifi_psk, key_mgmt: :"WPA-PSK"}
+        ]
+      }
+    }
+  else
+    %{type: VintageNetWiFi}
+  end
+
 config :vintage_net,
-  regulatory_domain: "00",
+  regulatory_domain: "IN",
   config: [
     {"usb0", %{type: VintageNetDirect}},
     {"eth0",
@@ -54,7 +72,7 @@ config :vintage_net,
        type: VintageNetEthernet,
        ipv4: %{method: :dhcp}
      }},
-    {"wlan0", %{type: VintageNetWiFi}}
+    {"wlan0", wifi_config}
   ]
 
 config :mdns_lite,
