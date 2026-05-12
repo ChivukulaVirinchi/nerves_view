@@ -48,6 +48,7 @@ defmodule NervesView.Recording.Store do
       camera_index =
         Map.update(state.camera_index, recording.camera_id, [recording.id], &[recording.id | &1])
 
+      Phoenix.PubSub.broadcast(NervesView.PubSub, "recordings", {:recording_stored, recording})
       {:reply, {:ok, recording}, %{state | recordings: recordings, camera_index: camera_index}}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}

@@ -59,29 +59,42 @@ defmodule NervesView.Pipeline.Runtime.FramePublisher do
   @impl true
   def handle_info(:tick, state) do
     snapshot = state.producer_module.snapshot(state.producer_pid)
+    now = System.system_time(:second)
 
-    frame =
-      if snapshot.healthy do
-        %{
-          payload: snapshot.payload,
-          sequence_number: snapshot.sequence,
-          timestamp: snapshot.timestamp,
-          inserted_at: System.system_time(:second)
-        }
-      else
-        %{
-          payload: <<0, 0, 1, 101, 0, 0, 0, 0>>,
-          sequence_number: 0,
-          timestamp: 0,
-          inserted_at: System.system_time(:second),
-          error: snapshot.last_error
-        }
-      end
+    if snapshot.healthy do
+      # Publish one StreamBus message per H.264 access unit. The :nals list
+      # carries the NALs of the AU in decode order (e.g. SPS, PPS, IDR for a
+      # keyframe AU; a single VCL NAL for an inter frame). All NALs of one AU
+      # share the same sequence_number and 90 kHz RTP timestamp so the
+      # PeerConnection can build correct STAP-A + FU-A packets, and so the
+      # SegmentWriter can keep its per-NAL IDR-boundary cut logic by iterating
+      # the list. The :payload field is kept for back-compat.
+      aus = Map.get(snapshot, :au_queue, [])
 
-    StreamBus.publish(state.camera_id, frame)
+      Enum.each(aus, fn {nals, seq, ts} ->
+        StreamBus.publish(state.camera_id, %{
+          payload: hd(nals),
+          nals: nals,
+          sequence_number: seq,
+          timestamp: ts,
+          inserted_at: now
+        })
+      end)
+    else
+      payload = <<0, 0, 1, 101, 0, 0, 0, 0>>
+
+      StreamBus.publish(state.camera_id, %{
+        payload: payload,
+        nals: [payload],
+        sequence_number: 0,
+        timestamp: 0,
+        inserted_at: now,
+        error: snapshot.last_error
+      })
+    end
+
     Process.send_after(self(), :tick, @tick_ms)
-
-    {:noreply, %{state | last_frame_at: System.system_time(:second)}}
+    {:noreply, %{state | last_frame_at: now}}
   end
 
   @impl true

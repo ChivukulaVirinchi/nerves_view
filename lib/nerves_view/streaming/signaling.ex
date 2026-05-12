@@ -34,16 +34,27 @@ defmodule NervesView.Streaming.Signaling do
     GenServer.call(@name, {:create_session, camera_id, viewer_id})
   end
 
-  @spec create_offer(String.t(), String.t(), String.t()) :: {:ok, String.t(), String.t()}
-  def create_offer(camera_id, viewer_id, offer_sdp)
+  @spec create_offer(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, String.t(), String.t()}
+  def create_offer(camera_id, viewer_id, offer_sdp, opts \\ [])
       when is_binary(camera_id) and is_binary(viewer_id) and is_binary(offer_sdp) do
-    GenServer.call(@name, {:create_offer, camera_id, viewer_id, offer_sdp})
+    GenServer.call(@name, {:create_offer, camera_id, viewer_id, offer_sdp, opts})
   end
 
-  @spec apply_answer(String.t(), String.t()) :: :ok | {:error, :not_found}
-  def apply_answer(session_id, answer_sdp)
+  @doc """
+  Browser-offers-server-answers flow: receive browser's offer, return server's answer.
+  """
+  @spec handle_offer(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, String.t(), String.t()} | {:error, term()}
+  def handle_offer(camera_id, viewer_id, offer_sdp, opts \\ [])
+      when is_binary(camera_id) and is_binary(viewer_id) and is_binary(offer_sdp) do
+    GenServer.call(@name, {:handle_offer, camera_id, viewer_id, offer_sdp, opts}, 20_000)
+  end
+
+  @spec apply_answer(String.t(), String.t(), keyword()) :: :ok | {:error, :not_found}
+  def apply_answer(session_id, answer_sdp, opts \\ [])
       when is_binary(session_id) and is_binary(answer_sdp) do
-    GenServer.call(@name, {:apply_answer, session_id, answer_sdp})
+    GenServer.call(@name, {:apply_answer, session_id, answer_sdp, opts})
   end
 
   @spec add_ice_candidate(String.t(), :viewer | :publisher, map()) :: :ok | {:error, :not_found}
@@ -110,22 +121,21 @@ defmodule NervesView.Streaming.Signaling do
   def handle_call({:create_session, camera_id, viewer_id}, _from, state) do
     session_id = unique_session_id()
 
-    case PeerManager.start_session(session_id, camera_id, viewer_id) do
-      {:ok, _pid} ->
-        session = session_from_peer!(session_id)
-        {:reply, {:ok, session_id}, Map.put(state, session_id, session)}
-
+    with {:ok, _pid} <- PeerManager.start_session(session_id, camera_id, viewer_id),
+         {:ok, session} <- session_from_peer(session_id) do
+      {:reply, {:ok, session_id}, Map.put(state, session_id, session)}
+    else
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
   end
 
-  def handle_call({:create_offer, camera_id, viewer_id, offer_sdp}, _from, state) do
+  def handle_call({:create_offer, camera_id, viewer_id, offer_sdp, opts}, _from, state) do
     session_id = unique_session_id()
 
-    with {:ok, _pid} <- PeerManager.start_session(session_id, camera_id, viewer_id),
-         {:ok, generated_offer} <- PeerConnection.create_offer(session_id, offer_sdp) do
-      session = session_from_peer!(session_id)
+    with {:ok, _pid} <- PeerManager.start_session(session_id, camera_id, viewer_id, opts),
+         {:ok, generated_offer} <- PeerConnection.create_offer(session_id, offer_sdp),
+         {:ok, session} <- session_from_peer(session_id) do
       {:reply, {:ok, session_id, generated_offer}, Map.put(state, session_id, session)}
     else
       {:error, reason} ->
@@ -133,11 +143,29 @@ defmodule NervesView.Streaming.Signaling do
     end
   end
 
-  def handle_call({:apply_answer, session_id, answer_sdp}, _from, state) do
+  def handle_call({:handle_offer, camera_id, viewer_id, offer_sdp, opts}, _from, state) do
+    session_id = unique_session_id()
+
+    with {:ok, _pid} <- PeerManager.start_session(session_id, camera_id, viewer_id, opts),
+         {:ok, answer_sdp} <-
+           PeerConnection.handle_browser_offer(session_id, offer_sdp, opts),
+         {:ok, session} <- session_from_peer(session_id) do
+      {:reply, {:ok, session_id, answer_sdp}, Map.put(state, session_id, session)}
+    else
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:apply_answer, session_id, answer_sdp, opts}, _from, state) do
     case PeerManager.get_session(session_id) do
       {:ok, _session} ->
-        :ok = PeerConnection.set_answer(session_id, answer_sdp)
-        {:reply, :ok, Map.put(state, session_id, session_from_peer!(session_id))}
+        :ok = PeerConnection.set_answer(session_id, answer_sdp, opts)
+
+        case session_from_peer(session_id) do
+          {:ok, session} -> {:reply, :ok, Map.put(state, session_id, session)}
+          {:error, _} -> {:reply, :ok, state}
+        end
 
       {:error, :not_found} ->
         {:reply, {:error, :not_found}, state}
@@ -148,7 +176,11 @@ defmodule NervesView.Streaming.Signaling do
     case PeerManager.get_session(session_id) do
       {:ok, _session} ->
         :ok = PeerConnection.add_ice_candidate(session_id, role, candidate)
-        {:reply, :ok, Map.put(state, session_id, session_from_peer!(session_id))}
+
+        case session_from_peer(session_id) do
+          {:ok, session} -> {:reply, :ok, Map.put(state, session_id, session)}
+          {:error, _} -> {:reply, :ok, state}
+        end
 
       {:error, :not_found} ->
         {:reply, {:error, :not_found}, state}
@@ -171,7 +203,11 @@ defmodule NervesView.Streaming.Signaling do
     case PeerManager.get_session(session_id) do
       {:ok, _session} ->
         :ok = PeerConnection.mark_connected(session_id)
-        {:reply, :ok, Map.put(state, session_id, session_from_peer!(session_id))}
+
+        case session_from_peer(session_id) do
+          {:ok, session} -> {:reply, :ok, Map.put(state, session_id, session)}
+          {:error, _} -> {:reply, :ok, state}
+        end
 
       {:error, :not_found} ->
         {:reply, {:error, :not_found}, state}
@@ -182,7 +218,11 @@ defmodule NervesView.Streaming.Signaling do
     case PeerManager.get_session(session_id) do
       {:ok, _session} ->
         :ok = PeerConnection.close(session_id, reason)
-        {:reply, :ok, Map.put(state, session_id, session_from_peer!(session_id))}
+
+        case session_from_peer(session_id) do
+          {:ok, session} -> {:reply, :ok, Map.put(state, session_id, session)}
+          {:error, _} -> {:reply, :ok, Map.delete(state, session_id)}
+        end
 
       {:error, :not_found} ->
         {:reply, {:error, :not_found}, state}
@@ -207,21 +247,26 @@ defmodule NervesView.Streaming.Signaling do
     {:reply, :ok, %{}}
   end
 
-  defp session_from_peer!(session_id) do
-    {:ok, peer} = PeerManager.get_session(session_id)
+  defp session_from_peer(session_id) do
+    case PeerManager.get_session(session_id) do
+      {:ok, peer} ->
+        {:ok,
+         %{
+           camera_id: peer.camera_id,
+           viewer_id: peer.viewer_id,
+           offer_sdp: peer.offer_sdp,
+           answer_sdp: peer.answer_sdp,
+           ice_candidates: peer.ice_candidates,
+           state: peer.state,
+           state_reason: peer.state_reason,
+           timeout_at: peer.timeout_at,
+           inserted_at: peer.inserted_at,
+           updated_at: peer.updated_at
+         }}
 
-    %{
-      camera_id: peer.camera_id,
-      viewer_id: peer.viewer_id,
-      offer_sdp: peer.offer_sdp,
-      answer_sdp: peer.answer_sdp,
-      ice_candidates: peer.ice_candidates,
-      state: peer.state,
-      state_reason: peer.state_reason,
-      timeout_at: peer.timeout_at,
-      inserted_at: peer.inserted_at,
-      updated_at: peer.updated_at
-    }
+      {:error, :not_found} ->
+        {:error, :not_found}
+    end
   end
 
   defp unique_session_id do

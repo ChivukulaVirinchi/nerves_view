@@ -34,6 +34,9 @@ defmodule NervesView.Application do
              ]}
         },
         {NervesView.Recording.Store, []},
+        {NervesView.Recording.PlaylistManager, []},
+        {NervesView.Recording.SegmentReaper, []},
+        {NervesView.DVR.SegmentIndex, []},
         {NervesView.Storage.Manager, []},
         {NervesView.Security.RateLimiter, []},
         {NervesView.Cluster.NodeRegistry, []},
@@ -65,6 +68,14 @@ defmodule NervesView.Application do
   end
 
   defp ensure_default_camera_started do
+    # Load CSI camera sensor kernel modules that may not auto-load
+    for mod <- ~w(ov5647 imx219 imx477 imx708) do
+      System.cmd("modprobe", [mod], stderr_to_stdout: true)
+    end
+
+    # Wait for the sensor to finish probing after modprobe
+    await_camera_sensor()
+
     cameras = NervesView.list_cameras()
 
     if cameras == [] do
@@ -80,6 +91,18 @@ defmodule NervesView.Application do
 
     Enum.each(NervesView.list_cameras(), &NervesView.start_camera_pipeline(&1.id))
     :ok
+  end
+
+  defp await_camera_sensor(attempts \\ 10)
+  defp await_camera_sensor(0), do: :ok
+
+  defp await_camera_sensor(attempts) do
+    case System.cmd("libcamera-vid", ["--list-cameras"], stderr_to_stdout: true) do
+      {output, 0} when output != "No cameras available!\n" -> :ok
+      _ ->
+        Process.sleep(500)
+        await_camera_sensor(attempts - 1)
+    end
   end
 
   # List all child processes to be supervised

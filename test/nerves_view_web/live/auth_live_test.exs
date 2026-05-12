@@ -34,11 +34,7 @@ defmodule NervesViewWeb.AuthLiveTest do
     {:ok, _view, html} = live(build_conn(), ~p"/register")
     assert html =~ "First account becomes admin"
 
-    conn =
-      post(conn, ~p"/register", %{
-        "email" => "owner@example.com",
-        "password" => "password123"
-      })
+    conn = register_via_post(conn, "owner@example.com", "password123")
 
     assert redirected_to(conn) == ~p"/dashboard"
     [user] = Store.list_users()
@@ -48,11 +44,7 @@ defmodule NervesViewWeb.AuthLiveTest do
   test "login redirects to dashboard", %{conn: conn} do
     assert {:ok, _} = Store.register("viewer@example.com", "password123", :viewer)
 
-    conn =
-      post(conn, ~p"/login", %{
-        "email" => "viewer@example.com",
-        "password" => "password123"
-      })
+    conn = login_via_post(conn, "viewer@example.com", "password123")
 
     assert redirected_to(conn) == ~p"/dashboard"
   end
@@ -63,22 +55,14 @@ defmodule NervesViewWeb.AuthLiveTest do
   end
 
   test "full flow register then logout then login", %{conn: conn} do
-    conn =
-      post(conn, ~p"/register", %{
-        "email" => "ops@example.com",
-        "password" => "password123"
-      })
+    conn = register_via_post(conn, "ops@example.com", "password123")
 
     assert redirected_to(conn) == ~p"/dashboard"
 
     conn = get(conn, ~p"/logout")
     assert redirected_to(conn) == ~p"/login"
 
-    conn =
-      post(conn, ~p"/login", %{
-        "email" => "ops@example.com",
-        "password" => "password123"
-      })
+    conn = login_via_post(conn, "ops@example.com", "password123")
 
     assert redirected_to(conn) == ~p"/dashboard"
   end
@@ -86,16 +70,12 @@ defmodule NervesViewWeb.AuthLiveTest do
   test "dashboard starts test pipeline", %{conn: conn} do
     assert {:ok, _} = Store.register("dash@example.com", "password123", :viewer)
 
-    conn =
-      post(conn, ~p"/login", %{
-        "email" => "dash@example.com",
-        "password" => "password123"
-      })
+    conn = login_via_post(conn, "dash@example.com", "password123")
 
     assert redirected_to(conn) == ~p"/dashboard"
 
     conn = get(conn, ~p"/dashboard")
-    assert html_response(conn, 200) =~ "Live multi-camera dashboard"
+    assert html_response(conn, 200) =~ "Live Feed"
     assert {:ok, status} = Manager.status("cam-ui")
     assert status.status == :running
   end

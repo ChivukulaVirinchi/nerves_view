@@ -50,8 +50,8 @@ defmodule NervesView.Camera.Producer.Synthetic do
      %{
        state
        | last_frame_at: now,
-         sequence: rem(state.sequence + 1, 65_535),
-         timestamp: rem(state.timestamp + 3_000, 4_294_967_295)
+         sequence: rem(state.sequence + 1, 65_536),
+         timestamp: rem(state.timestamp + 3_000, 4_294_967_296)
      }}
   end
 end

@@ -1,97 +1,154 @@
 defmodule NervesViewWeb.DashboardLive do
   use NervesViewWeb, :live_view
 
+  import NervesViewWeb.Helpers
+  import NervesViewWeb.WebRTCSignaling
+
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(NervesView.PubSub, "alerts:motion")
+      :timer.send_interval(5_000, self(), :tick)
     end
 
-    Enum.each(NervesView.list_cameras(), &NervesView.start_camera_pipeline(&1.id))
+    cameras = NervesView.list_cameras()
+    Enum.each(cameras, &NervesView.start_camera_pipeline(&1.id))
 
-    stream_token =
+    token =
       Phoenix.Token.sign(NervesViewWeb.Endpoint, "webrtc_stream", socket.assigns.current_user.id)
 
     {:ok,
      socket
+     |> assign_peer_ip()
      |> assign(page_title: "Dashboard")
-     |> assign(cameras: NervesView.list_cameras())
-     |> assign(diagnostics: diagnostics_by_id())
-     |> assign(last_motion: %{})
-     |> assign(stream_token: stream_token)
-     |> assign(grid_layout: 4)}
+     |> assign(cameras: cameras)
+     |> assign(diags: diag_map())
+     |> assign(motions: %{})
+     |> assign(token: token)
+     |> assign(grid: 4)
+     |> assign(stats: sys_stats())}
   end
 
   @impl true
+  def handle_info(:tick, socket) do
+    {:noreply, socket |> assign(diags: diag_map()) |> assign(stats: sys_stats())}
+  end
+
   def handle_info({:motion_alert, alert}, socket) do
-    {:noreply,
-     assign(socket, :last_motion, Map.put(socket.assigns.last_motion, alert.camera_id, alert))}
+    {:noreply, assign(socket, :motions, Map.put(socket.assigns.motions, alert.camera_id, alert))}
+  end
+
+  def handle_info({:ex_webrtc, _, _} = msg, socket), do: handle_webrtc_info(msg, socket)
+  def handle_info({:pipeline_frame, _, _} = msg, socket), do: handle_webrtc_info(msg, socket)
+  def handle_info({:webrtc_negotiated, _, _, _, _} = msg, socket), do: handle_webrtc_info(msg, socket)
+
+  @impl true
+  def handle_event("webrtc:" <> _ = event, params, socket),
+    do: handle_webrtc_event(event, params, socket)
+
+  def handle_event("grid", %{"n" => n}, socket) do
+    v =
+      case Integer.parse(n) do
+        {v, _} when v in [1, 2, 4, 9] -> v
+        _ -> 4
+      end
+
+    {:noreply, assign(socket, :grid, v)}
   end
 
   @impl true
   def render(assigns) do
     ~H"""
-    <section>
-      <h1>Dashboard</h1>
-      <p class="muted">Live multi-camera dashboard.</p>
+    <div>
+      <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mb-5">
+        <div>
+          <h1 class="pg-title">Live Feed</h1>
+          <p class="pg-sub">
+            {length(@cameras)} source{if length(@cameras) != 1, do: "s"}
+            · <span class="text-sage">{n_healthy(@diags)} online</span>
+          </p>
+        </div>
 
-      <div class="grid-picker">
-        <button phx-click="set_layout" phx-value-layout="1">1</button>
-        <button phx-click="set_layout" phx-value-layout="2">2</button>
-        <button phx-click="set_layout" phx-value-layout="4">4</button>
-        <button phx-click="set_layout" phx-value-layout="9">9</button>
+        <div class="flex items-center gap-2 flex-wrap">
+          <div class="hidden md:flex items-center gap-1.5">
+            <span class="sys-pill">{@stats.mem} MB</span>
+            <span class="sys-pill">Load {@stats.load}</span>
+            <span class="sys-pill">Up {@stats.up}</span>
+          </div>
+          <div class="flex p-0.5 bg-muted rounded-lg gap-0.5">
+            <.button
+              :for={n <- [1, 2, 4, 9]}
+              variant={if @grid == n, do: "secondary", else: "ghost"}
+              size="sm"
+              phx-click="grid"
+              phx-value-n={n}
+            >{n}</.button>
+          </div>
+        </div>
       </div>
 
-      <div class={"camera-grid layout-#{@grid_layout}"}>
-        <%= for camera <- @cameras do %>
-          <% diag = Map.get(@diagnostics, camera.id, %{}) %>
-          <article class="camera-card">
-            <h2>{camera.name}</h2>
-            <video
-              id={"video-#{camera.id}"}
-              class="camera-video"
-              autoplay
-              muted
-              playsinline
-              phx-hook="WebRTCPlayer"
-              data-camera-id={camera.id}
-              data-viewer-id={"viewer-#{@current_user.id}"}
-              data-stream-token={@stream_token}
-            ></video>
-            <p>ID: {camera.id}</p>
-            <p>Status: {camera.status}</p>
-            <p>Pipeline: {Map.get(diag, :pipeline_status, :stopped)}</p>
-            <p>Healthy: {if Map.get(diag, :healthy, false), do: "yes", else: "no"}</p>
-            <%= if motion = Map.get(@last_motion, camera.id) do %>
-              <p class="motion-pill">Motion at {motion.inserted_at}</p>
-            <% end %>
-          </article>
-        <% end %>
+      <div class={"cam-grid g#{@grid}"}>
+        <%= for cam <- @cameras do %>
+          <% d = Map.get(@diags, cam.id, %{}) %>
+          <% ok? = Map.get(d, :healthy, false) %>
+          <% pipe = Map.get(d, :pipeline_status) %>
+          <% frm = Map.get(d, :last_frame_at) %>
+          <.link navigate={~p"/cameras/#{cam.id}"} class="block">
+            <.card class={"cam-card overflow-hidden #{if ok?, do: "cam-live"}"}>
+              <:content class="p-0">
+                <div class="cam-vp">
+                  <video
+                    id={"v-#{cam.id}"}
+                    class="cam-vid"
+                    autoplay muted playsinline
+                    phx-hook="CameraPlayer"
+                    data-camera-id={cam.id}
+                    data-viewer-id={"v-#{@current_user.id}"}
+                    data-stream-token={@token}
+                  />
+                  <%= unless ok? do %><div class="cam-ns">No Signal</div><% end %>
+                  <div class="cam-hud">
+                    <div class="cam-hud-r">
+                      <span class="cam-hud-t">{cam.name}</span>
+                      <%= if ok? do %><span class="cam-rec">REC</span><% end %>
+                    </div>
+                    <div class="cam-hud-r">
+                      <span class="cam-hud-t">{cam.id}</span>
+                      <span class="cam-hud-t">{fmt_ts(frm)}</span>
+                    </div>
+                  </div>
+                </div>
 
-        <%= if @cameras == [] do %>
-          <article class="camera-card empty">
-            <h2>No cameras yet</h2>
-            <p>Add camera sources in upcoming phases.</p>
-          </article>
+                <div class="px-3 py-2 flex items-center justify-between gap-2 border-t text-sm">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class={"dot #{if ok?, do: "dot-live", else: "dot-dead"}"} />
+                    <span class="font-display font-semibold truncate">{cam.name}</span>
+                  </div>
+                  <div class="flex items-center gap-1.5 shrink-0">
+                    <%= if Map.get(@motions, cam.id) do %>
+                      <.badge variant="outline">Motion</.badge>
+                    <% end %>
+                    <.badge variant={pipe_variant(pipe, ok?)}>{pipe_label(pipe, ok?)}</.badge>
+                  </div>
+                </div>
+              </:content>
+            </.card>
+          </.link>
         <% end %>
       </div>
-    </section>
+
+      <%= if @cameras == [] do %>
+        <.empty class="mt-12">
+          <:title>No cameras connected</:title>
+          <:description>Plug in a camera or add one in Settings.</:description>
+          <:actions><.button navigate={~p"/settings"}>Open Settings</.button></:actions>
+        </.empty>
+      <% end %>
+    </div>
     """
   end
 
-  @impl true
-  def handle_event("set_layout", %{"layout" => layout}, socket) do
-    parsed =
-      case Integer.parse(layout || "") do
-        {value, _} when value in [1, 2, 4, 9] -> value
-        _ -> 4
-      end
+  defp diag_map, do: NervesView.camera_diagnostics() |> Map.new(&{&1.camera_id, &1})
+  defp n_healthy(d), do: d |> Map.values() |> Enum.count(& &1.healthy)
 
-    {:noreply, assign(socket, :grid_layout, parsed)}
-  end
-
-  defp diagnostics_by_id do
-    NervesView.camera_diagnostics()
-    |> Map.new(fn item -> {item.camera_id, item} end)
-  end
 end

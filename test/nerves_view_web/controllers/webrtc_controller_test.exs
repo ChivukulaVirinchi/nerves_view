@@ -43,6 +43,9 @@ defmodule NervesViewWeb.WebRTCControllerTest do
       })
 
     assert %{"ok" => true} = json_response(conn, 200)
+
+    conn = post(build_conn(), ~p"/api/webrtc/close", %{session_id: session_id})
+    assert %{"ok" => true} = json_response(conn, 200)
   end
 
   test "returns not found for unknown camera", %{conn: conn, token: token} do
@@ -70,5 +73,10 @@ defmodule NervesViewWeb.WebRTCControllerTest do
       })
 
     assert %{"error" => "invalid_or_expired_token"} = json_response(conn, 401)
+  end
+
+  test "rejects close without session_id", %{conn: conn} do
+    conn = post(conn, ~p"/api/webrtc/close", %{})
+    assert %{"error" => "session_id_required"} = json_response(conn, 400)
   end
 end

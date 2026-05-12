@@ -20,9 +20,11 @@ defmodule NervesViewWeb.Router do
   scope "/", NervesViewWeb do
     pipe_through([:browser])
 
-    get("/", RedirectController, :home)
+    get("/", Plugs.RootRedirect, [])
     get("/recordings/:id/playlist.m3u8", RecordingController, :playlist)
     get("/recordings/:id/segments/:segment", RecordingController, :segment)
+    get("/cameras/:camera_id/live.m3u8", RecordingController, :live_playlist)
+    get("/cameras/:camera_id/segments/:segment", RecordingController, :live_segment)
     post("/login", SessionController, :create)
     post("/register", RegistrationController, :create)
     get("/logout", SessionController, :delete)
@@ -34,6 +36,11 @@ defmodule NervesViewWeb.Router do
     post("/webrtc/offer", WebRTCController, :offer)
     post("/webrtc/answer", WebRTCController, :answer)
     post("/webrtc/ice-candidate", WebRTCController, :ice_candidate)
+    post("/webrtc/close", WebRTCController, :close)
+
+    get("/dvr/:camera_id/playlist.m3u8", DVRController, :playlist)
+    get("/dvr/:camera_id/segments/:filename", DVRController, :segment)
+    get("/dvr/:camera_id/timeline", DVRController, :timeline)
   end
 
   scope "/", NervesViewWeb do
@@ -53,8 +60,13 @@ defmodule NervesViewWeb.Router do
     live_session :require_authenticated_user,
       on_mount: [{NervesViewWeb.UserAuth, :ensure_authenticated}] do
       live("/dashboard", DashboardLive, :index)
-      live("/settings", SettingsLive, :index)
+      live("/cameras/:id", CameraLive, :show)
       live("/recordings", RecordingsLive, :index)
+    end
+
+    live_session :require_admin_user,
+      on_mount: [{NervesViewWeb.UserAuth, :ensure_admin}] do
+      live("/settings", SettingsLive, :index)
     end
   end
 end

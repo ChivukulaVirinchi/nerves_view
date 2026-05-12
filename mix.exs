@@ -54,11 +54,14 @@ defmodule NervesView.MixProject do
       # Allow Nerves.Runtime on host to support development, testing and CI.
       # See config/host.exs for usage.
       {:nerves_runtime, "~> 0.13.0"},
-      {:phoenix, "~> 1.7.12"},
+      {:phoenix, "~> 1.8.5"},
       {:phoenix_html, "~> 4.1"},
-      {:phoenix_live_view, "~> 1.0"},
+      {:phoenix_live_view, "~> 1.1.27"},
       {:phoenix_live_reload, "~> 1.5", only: :dev},
       {:phoenix_live_dashboard, "~> 0.8"},
+      {:sutra_ui, "~> 0.3.0"},
+      {:ecto, "~> 3.12"},
+      {:phoenix_ecto, "~> 4.6"},
       {:jason, "~> 1.4"},
       {:lazy_html, ">= 0.1.0", only: :test},
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
@@ -66,8 +69,8 @@ defmodule NervesView.MixProject do
       {:bandit, "~> 1.5"},
       {:gettext, "~> 0.26"},
       {:bcrypt_elixir, "~> 3.0"},
-      {:ex_webrtc, "~> 0.14"},
-      {:ex_ice, "~> 0.7"},
+      {:ex_webrtc, "~> 0.16"},
+      {:ex_dtls, path: "../ex_dtls", override: true},
       {:libcluster, "~> 3.3"},
 
       # Dependencies for all targets except :host
@@ -103,10 +106,12 @@ defmodule NervesView.MixProject do
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
       "assets.build": ["tailwind nerves_view", "esbuild nerves_view"],
       "assets.deploy": [
+        "compile",
         "tailwind nerves_view --minify",
         "esbuild nerves_view --minify",
         "phx.digest"
-      ]
+      ],
+      firmware: ["assets.deploy", "firmware"]
     ]
   end
 

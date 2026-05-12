@@ -4,6 +4,7 @@ defmodule NervesView.Pipeline.Runtime.Target do
   @behaviour NervesView.Pipeline.Runtime
 
   alias NervesView.Pipeline.Runtime.FramePublisher
+  alias NervesView.Recording.SegmentWriter
 
   @impl true
   def start_pipeline(descriptor, _opts) do
@@ -19,11 +20,22 @@ defmodule NervesView.Pipeline.Runtime.Target do
                ) do
           snapshot = FramePublisher.snapshot(publisher_pid)
 
+          # Start the segment writer for continuous recording
+          writer_pid =
+            case SegmentWriter.start_link(camera_id: descriptor.camera_id) do
+              {:ok, pid} -> pid
+              {:error, reason} ->
+                require Logger
+                Logger.warning("SegmentWriter failed to start: #{inspect(reason)}")
+                nil
+            end
+
           {:ok,
            descriptor
            |> Map.put(:runtime, %{
              module: __MODULE__,
              publisher_pid: publisher_pid,
+             writer_pid: writer_pid,
              source_path: path
            })
            |> Map.put(:status, :running)
@@ -31,8 +43,6 @@ defmodule NervesView.Pipeline.Runtime.Target do
            |> Map.put(:last_frame_at, snapshot.last_frame_at)
            |> Map.put(:last_error, snapshot.last_error)}
         else
-          {:error, :invalid_rtsp_url} -> {:error, :invalid_source}
-          {:error, :device_not_found} -> {:error, :invalid_source}
           {:error, reason} -> {:error, reason}
         end
 
@@ -42,8 +52,15 @@ defmodule NervesView.Pipeline.Runtime.Target do
   end
 
   @impl true
-  def stop_pipeline(%{runtime: %{publisher_pid: publisher_pid}}) when is_pid(publisher_pid) do
-    if Process.alive?(publisher_pid), do: GenServer.stop(publisher_pid, :normal)
+  def stop_pipeline(%{runtime: runtime}) do
+    if is_pid(runtime[:publisher_pid]) and Process.alive?(runtime.publisher_pid) do
+      GenServer.stop(runtime.publisher_pid, :normal)
+    end
+
+    if is_pid(runtime[:writer_pid]) and Process.alive?(runtime.writer_pid) do
+      GenServer.stop(runtime.writer_pid, :normal)
+    end
+
     :ok
   end
 
@@ -69,14 +86,5 @@ defmodule NervesView.Pipeline.Runtime.Target do
   def health(_), do: %{healthy: false}
 
   defp validate_source(:libcamera, _path), do: :ok
-
-  defp validate_source(:v4l2, path) do
-    if File.exists?(path), do: :ok, else: {:error, :device_not_found}
-  end
-
-  defp validate_source(:rtsp, path) do
-    if String.starts_with?(path, "rtsp://"), do: :ok, else: {:error, :invalid_rtsp_url}
-  end
-
   defp validate_source(_, _path), do: {:error, :invalid_source}
 end

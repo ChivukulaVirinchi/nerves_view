@@ -7,7 +7,6 @@ defmodule NervesView.Camera.Producer do
 
   @spec module_for(atom()) :: module()
   def module_for(:libcamera), do: NervesView.Camera.Producer.Libcamera
-  def module_for(:v4l2), do: NervesView.Camera.Producer.V4L2
-  def module_for(:rtsp), do: NervesView.Camera.Producer.RTSP
-  def module_for(_), do: NervesView.Camera.Producer.Synthetic
+  def module_for(:synthetic), do: NervesView.Camera.Producer.Synthetic
+  def module_for(other), do: raise("Unsupported camera source type: #{inspect(other)}")
 end

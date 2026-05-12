@@ -1,60 +1,32 @@
 defmodule NervesViewWeb.RegistrationController do
   use NervesViewWeb, :controller
 
-  alias NervesView
-  alias NervesView.Security.RateLimiter
+  alias NervesView.Accounts.SessionStore
   alias NervesViewWeb.UserAuth
 
-  def first_boot?(users \\ nil) do
-    case users || NervesView.list_users() do
-      [] -> true
-      _ -> false
-    end
-  end
+  @handoff_max_age 30
 
-  def create(conn, %{"email" => email, "password" => password}) do
-    with :ok <- rate_limit(conn, 6) do
-      role = registration_role()
+  @doc """
+  Creates a session after registration. Called via phx-trigger-action after
+  LiveView validates and registers the user. The LiveView passes a signed
+  handoff token so we don't re-register or re-authenticate here.
+  """
+  def create(conn, %{"user" => %{"handoff_token" => token}}) when is_binary(token) do
+    case Phoenix.Token.verify(NervesViewWeb.Endpoint, "auth_handoff", token,
+           max_age: @handoff_max_age
+         ) do
+      {:ok, user_id} ->
+        {:ok, session} = SessionStore.create(user_id)
 
-      with {:ok, _user} <- NervesView.register_user(email, password, role),
-           {:ok, %{session: session}} <- NervesView.login(email, password) do
         conn
         |> put_session(UserAuth.session_key(), session.token)
         |> put_flash(:info, "Account created.")
         |> redirect(to: ~p"/dashboard")
-      else
-        {:error, :email_taken} ->
-          conn
-          |> put_flash(:error, "Email already registered.")
-          |> redirect(to: ~p"/register")
 
-        {:error, :password_too_short} ->
-          conn
-          |> put_flash(:error, "Password must be at least 8 characters.")
-          |> redirect(to: ~p"/register")
-
-        {:error, _reason} ->
-          conn
-          |> put_flash(:error, "Unable to create account.")
-          |> redirect(to: ~p"/register")
-      end
-    else
-      {:error, :rate_limited} ->
+      {:error, _} ->
         conn
-        |> put_flash(:error, "Too many attempts, try again shortly.")
+        |> put_flash(:error, "Registration failed. Please try again.")
         |> redirect(to: ~p"/register")
     end
-  end
-
-  defp registration_role do
-    case first_boot?() do
-      true -> :admin
-      _users -> :viewer
-    end
-  end
-
-  defp rate_limit(conn, max_attempts) do
-    ip = to_string(:inet.ntoa(conn.remote_ip || {127, 0, 0, 1}))
-    RateLimiter.check("auth:#{ip}", max_attempts: max_attempts, window_seconds: 60)
   end
 end

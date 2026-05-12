@@ -55,6 +55,30 @@ defmodule NervesViewWeb.UserAuth do
     end
   end
 
+  def on_mount(:ensure_admin, _params, session, socket) do
+    token = Map.get(session, @session_key)
+
+    case user_from_token(token) do
+      nil ->
+        {:halt,
+         socket
+         |> Phoenix.LiveView.put_flash(:error, "Please log in to continue.")
+         |> Phoenix.LiveView.redirect(to: "/login")}
+
+      %{role: :admin} = user ->
+        {:cont,
+         socket
+         |> Phoenix.Component.assign(:current_user, user)
+         |> Phoenix.Component.assign(:user_token, token)}
+
+      _user ->
+        {:halt,
+         socket
+         |> Phoenix.LiveView.put_flash(:error, "Admin access required.")
+         |> Phoenix.LiveView.redirect(to: "/dashboard")}
+    end
+  end
+
   def on_mount(:mount_current_user, _params, session, socket) do
     token = Map.get(session, @session_key)
 

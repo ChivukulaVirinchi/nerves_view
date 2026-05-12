@@ -5,9 +5,11 @@ defmodule NervesView.Streaming.PeerManager do
 
   alias NervesView.Streaming.PeerConnection
 
-  @spec start_session(String.t(), String.t(), String.t()) :: {:ok, pid()} | {:error, term()}
-  def start_session(session_id, camera_id, viewer_id) do
-    spec = {PeerConnection, session_id: session_id, camera_id: camera_id, viewer_id: viewer_id}
+  @spec start_session(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, pid()} | {:error, term()}
+  def start_session(session_id, camera_id, viewer_id, opts \\ []) do
+    peer_opts = [session_id: session_id, camera_id: camera_id, viewer_id: viewer_id] ++ opts
+    spec = {PeerConnection, peer_opts}
     DynamicSupervisor.start_child(NervesView.Streaming.PeerSupervisor, spec)
   end
 

@@ -1,37 +1,56 @@
 defmodule NervesViewWeb.SettingsLive do
   use NervesViewWeb, :live_view
 
+  import NervesViewWeb.Helpers, only: [fmt_ts: 2]
+
+  alias NervesView.CameraParams
+
   @impl true
   def mount(_params, _session, socket) do
+    changeset = CameraParams.changeset()
+
     {:ok,
      socket
      |> assign(page_title: "Settings")
      |> assign(cameras: NervesView.list_cameras())
      |> assign(diagnostics: NervesView.camera_diagnostics())
-     |> assign(form: default_camera_form())}
+     |> assign_cam_form(changeset)
+     |> assign(node_info: node_info())}
   end
 
   @impl true
+  def handle_event("validate_cam", %{"camera" => params}, socket) do
+    changeset =
+      params
+      |> CameraParams.changeset()
+      |> Map.put(:action, :validate)
+
+    {:noreply, assign_cam_form(socket, changeset)}
+  end
+
   def handle_event("add_camera", %{"camera" => params}, socket) do
-    attrs = %{
-      id: String.trim(params["id"] || ""),
-      name: String.trim(params["name"] || ""),
-      source_type: parse_source_type(params["source_type"]),
-      status: :streaming,
-      device_path: String.trim(params["device_path"] || "")
-    }
+    changeset = CameraParams.changeset(params)
 
-    case NervesView.register_camera(attrs) do
-      {:ok, _camera} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Camera added")
-         |> assign(cameras: NervesView.list_cameras())
-         |> assign(diagnostics: NervesView.camera_diagnostics())
-         |> assign(form: default_camera_form())}
+    if changeset.valid? do
+      attrs = Ecto.Changeset.apply_changes(changeset)
 
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "Could not add camera")}
+      case NervesView.register_camera(%{
+             id: attrs.id, name: attrs.name, source_type: :libcamera,
+             status: :streaming, device_path: attrs.device_path
+           }) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Camera \"#{attrs.name}\" added")
+           |> assign(cameras: NervesView.list_cameras())
+           |> assign(diagnostics: NervesView.camera_diagnostics())
+           |> assign_cam_form(CameraParams.changeset())}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Could not add camera")}
+      end
+    else
+      {:noreply, assign_cam_form(socket, %{changeset | action: :validate})}
     end
   end
 
@@ -47,16 +66,16 @@ defmodule NervesViewWeb.SettingsLive do
 
   def handle_event("restart_camera", %{"id" => id}, socket) do
     case NervesView.restart_camera_pipeline(id) do
-      {:ok, _pipeline} ->
+      {:ok, _} ->
         {:noreply,
          socket
-         |> put_flash(:info, "Camera pipeline restarted")
+         |> put_flash(:info, "Pipeline restarted")
          |> assign(diagnostics: NervesView.camera_diagnostics())}
 
-      {:error, _reason} ->
+      {:error, _} ->
         {:noreply,
          socket
-         |> put_flash(:error, "Could not restart camera pipeline")
+         |> put_flash(:error, "Could not restart pipeline")
          |> assign(diagnostics: NervesView.camera_diagnostics())}
     end
   end
@@ -64,91 +83,163 @@ defmodule NervesViewWeb.SettingsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <section>
-      <h1>Settings</h1>
-      <p class="muted">System settings UI placeholder (Phase 7).</p>
+    <div>
+      <h1 class="pg-title">Settings</h1>
+      <p class="pg-sub mb-5">System configuration and camera management</p>
 
-      <div class="card-list">
-        <article class="camera-card">
-          <h2>Node mode</h2>
-          <p>{NervesView.Mode.current()}</p>
-        </article>
+      <.tabs id="stabs" default_value="cameras">
+        <:tab value="cameras">Cameras</:tab>
+        <:tab value="system">System</:tab>
+        <:tab value="diagnostics">Diagnostics</:tab>
 
-        <article class="camera-card">
-          <h2>Network</h2>
-          <p>mDNS broadcast enabled</p>
-        </article>
-      </div>
+        <%!-- ─ Cameras ─ --%>
+        <:panel value="cameras">
+          <.card class="mt-4">
+            <:header>
+              <h3 class="font-display font-semibold text-sm">Add Camera Source</h3>
+              <p class="text-xs text-muted-foreground">Pipeline auto-starts on registration.</p>
+            </:header>
+            <:content>
+              <.form for={@cam_form} id="cam-form" phx-change="validate_cam" phx-submit="add_camera" class="grid gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <.input field={@cam_form[:id]} label="Camera ID" required
+                    placeholder="cam-front" />
+                  <.input field={@cam_form[:name]} label="Display Name" required
+                    placeholder="Front Door" />
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <.input field={@cam_form[:source_type]} type="select" label="Source"
+                    options={[{"libcamera", "libcamera"}]} />
+                  <.input field={@cam_form[:device_path]} label="Device Path" required
+                    placeholder="/dev/video0" />
+                </div>
+                <div><.button type="submit">Add Camera</.button></div>
+              </.form>
+            </:content>
+          </.card>
 
-      <h2>Add camera</h2>
-      <form phx-submit="add_camera" class="auth-form camera-form">
-        <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
-        <label for="camera_id">ID</label>
-        <input id="camera_id" name="camera[id]" value={@form.id} required />
+          <%= if @cameras != [] do %>
+            <div class="grid gap-3 mt-4 sm:grid-cols-2 lg:grid-cols-3">
+              <%= for cam <- @cameras do %>
+                <% d = Enum.find(@diagnostics, &(&1.camera_id == cam.id)) %>
+                <% ok? = d && d.healthy %>
+                <.card>
+                  <:content>
+                    <div class="flex items-center gap-2 mb-3">
+                      <span class={"dot #{if ok?, do: "dot-live", else: "dot-dead"}"} />
+                      <h3 class="font-display font-semibold text-sm">{cam.name}</h3>
+                      <.badge variant={if ok?, do: "success", else: "secondary"} class="ml-auto">
+                        {if ok?, do: "Online", else: "Offline"}
+                      </.badge>
+                    </div>
+                    <div class="kv mb-3">
+                      <span class="kv-k">ID</span><span>{cam.id}</span>
+                      <span class="kv-k">Source</span><span>{cam.source_type}</span>
+                      <span class="kv-k">Path</span><span>{cam.device_path || "—"}</span>
+                    </div>
+                    <div class="flex gap-2">
+                      <.button variant="outline" size="sm" phx-click="restart_camera" phx-value-id={cam.id}>Restart</.button>
+                      <.button variant="destructive" size="sm" phx-click="remove_camera" phx-value-id={cam.id}>Remove</.button>
+                    </div>
+                  </:content>
+                </.card>
+              <% end %>
+            </div>
+          <% else %>
+            <.empty class="mt-4" variant="outline">
+              <:title>No cameras</:title>
+              <:description>Use the form above to register a source.</:description>
+            </.empty>
+          <% end %>
+        </:panel>
 
-        <label for="camera_name">Name</label>
-        <input id="camera_name" name="camera[name]" value={@form.name} required />
+        <%!-- ─ System ─ --%>
+        <:panel value="system">
+          <div class="grid gap-3 mt-4 grid-cols-2 sm:grid-cols-3">
+            <.card><:content>
+              <p class="stat-num">{@node_info.mode}</p>
+              <p class="stat-lbl">Mode</p>
+            </:content></.card>
+            <.card><:content>
+              <p class="stat-num">{length(@cameras)}</p>
+              <p class="stat-lbl">Cameras</p>
+            </:content></.card>
+            <.card><:content>
+              <p class="stat-num">{@node_info.otp_apps}</p>
+              <p class="stat-lbl">OTP Apps</p>
+            </:content></.card>
+          </div>
 
-        <label for="camera_source">Source type</label>
-        <select id="camera_source" name="camera[source_type]">
-          <option value="libcamera" selected={@form.source_type == "libcamera"}>libcamera</option>
-          <option value="v4l2" selected={@form.source_type == "v4l2"}>v4l2</option>
-          <option value="rtsp" selected={@form.source_type == "rtsp"}>rtsp</option>
-        </select>
+          <.card class="mt-4">
+            <:header><h3 class="font-display font-semibold text-sm">Node Details</h3></:header>
+            <:content>
+              <div class="kv">
+                <span class="kv-k">Hostname</span><span>{@node_info.hostname}</span>
+                <span class="kv-k">Node</span><span>{@node_info.node_name}</span>
+                <span class="kv-k">Arch</span><span>{@node_info.arch}</span>
+                <span class="kv-k">OTP</span><span>{@node_info.otp_release}</span>
+                <span class="kv-k">Elixir</span><span>{@node_info.elixir_version}</span>
+                <span class="kv-k">Network</span><span>mDNS active · port 4000</span>
+              </div>
+            </:content>
+          </.card>
+        </:panel>
 
-        <label for="camera_path">Device path / URL</label>
-        <input id="camera_path" name="camera[device_path]" value={@form.device_path} required />
-
-        <button type="submit">Add camera</button>
-      </form>
-
-      <h2>Configured cameras</h2>
-      <div class="card-list">
-        <%= for camera <- @cameras do %>
-          <article class="camera-card">
-            <h3>{camera.name}</h3>
-            <p>ID: {camera.id}</p>
-            <p>Type: {camera.source_type}</p>
-            <p>Path: {camera.device_path || "n/a"}</p>
-            <button phx-click="remove_camera" phx-value-id={camera.id}>Remove</button>
-            <button phx-click="restart_camera" phx-value-id={camera.id}>Restart pipeline</button>
-          </article>
-        <% end %>
-      </div>
-
-      <h2>Diagnostics</h2>
-      <div class="card-list">
-        <%= for diag <- @diagnostics do %>
-          <article class="camera-card">
-            <h3>{diag.camera_name}</h3>
-            <p>Camera ID: {diag.camera_id}</p>
-            <p>Backend: {diag.source_type}</p>
-            <p>Path: {diag.device_path || "n/a"}</p>
-            <p>Pipeline: {diag.pipeline_status || :stopped}</p>
-            <p>Healthy: {if diag.healthy, do: "yes", else: "no"}</p>
-            <p>Last frame: {diag.last_frame_at || "n/a"}</p>
-            <p>Runtime source: {diag.source_path || "n/a"}</p>
-            <p :if={diag.last_error}>Last error: {inspect(diag.last_error)}</p>
-          </article>
-        <% end %>
-
-        <%= if @diagnostics == [] do %>
-          <article class="camera-card empty">
-            <h3>No diagnostics yet</h3>
-            <p>Add a camera to see runtime health details.</p>
-          </article>
-        <% end %>
-      </div>
-    </section>
+        <%!-- ─ Diagnostics ─ --%>
+        <:panel value="diagnostics">
+          <%= if @diagnostics == [] do %>
+            <.empty class="mt-4" variant="outline">
+              <:title>No diagnostics</:title>
+              <:description>Add a camera to see health data.</:description>
+            </.empty>
+          <% else %>
+            <div class="grid gap-3 mt-4">
+              <%= for d <- @diagnostics do %>
+                <.card>
+                  <:content>
+                    <div class="flex items-center gap-2 mb-3">
+                      <span class={"dot #{if d.healthy, do: "dot-live", else: "dot-dead"}"} />
+                      <h3 class="font-display font-semibold text-sm">{d.camera_name}</h3>
+                      <.badge variant={if d.healthy, do: "success", else: "destructive"} class="ml-auto">
+                        {if d.healthy, do: "Healthy", else: "Unhealthy"}
+                      </.badge>
+                    </div>
+                    <div class="kv">
+                      <span class="kv-k">Camera</span><span>{d.camera_id}</span>
+                      <span class="kv-k">Backend</span><span>{d.source_type}</span>
+                      <span class="kv-k">Device</span><span>{d.device_path || "—"}</span>
+                      <span class="kv-k">Pipeline</span><span>{d.pipeline_status || "stopped"}</span>
+                      <span class="kv-k">Source</span><span>{d.source_path || "—"}</span>
+                      <span class="kv-k">Last Frame</span><span class="tabular-nums">{fmt_ts(d.last_frame_at, "%Y-%m-%d %H:%M:%S")}</span>
+                      <%= if d.last_error do %>
+                        <span class="kv-k">Error</span>
+                        <span class="text-destructive">{inspect(d.last_error)}</span>
+                      <% end %>
+                    </div>
+                  </:content>
+                </.card>
+              <% end %>
+            </div>
+          <% end %>
+        </:panel>
+      </.tabs>
+    </div>
     """
   end
 
-  defp parse_source_type("libcamera"), do: :libcamera
-  defp parse_source_type("v4l2"), do: :v4l2
-  defp parse_source_type("rtsp"), do: :rtsp
-  defp parse_source_type(_), do: :libcamera
+  defp assign_cam_form(socket, changeset) do
+    assign(socket, :cam_form, to_form(changeset, as: "camera"))
+  end
 
-  defp default_camera_form do
-    %{id: "", name: "", source_type: "libcamera", device_path: "/dev/video0"}
+  defp node_info do
+    %{
+      mode: NervesView.Mode.current(),
+      hostname: node() |> Atom.to_string() |> String.split("@") |> List.last(),
+      node_name: node(),
+      arch: :erlang.system_info(:system_architecture) |> to_string(),
+      otp_release: :erlang.system_info(:otp_release) |> to_string(),
+      elixir_version: System.version(),
+      otp_apps: length(Application.started_applications())
+    }
   end
 end

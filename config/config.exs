@@ -20,15 +20,14 @@ config :nerves, source_date_epoch: "1774002223"
 
 config :nerves_view,
   ecto_repos: [],
-  mode: :standalone
+  mode: :standalone,
+  recordings_path: "tmp/recordings",
+  persistence_dir: "tmp/persistence",
+  recording_segment_duration: 6,
+  recording_retention_hours: 720,
+  ice_servers: [%{urls: "stun:stun.l.google.com:19302"}]
 
-config :libcluster,
-  topologies: [
-    nervesview_local: [
-      strategy: Cluster.Strategy.Epmd,
-      config: [hosts: [:"nervesview@127.0.0.1"]]
-    ]
-  ]
+config :libcluster, topologies: []
 
 config :phoenix, :json_library, Jason
 

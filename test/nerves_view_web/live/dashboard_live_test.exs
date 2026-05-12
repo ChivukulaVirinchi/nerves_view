@@ -27,21 +27,15 @@ defmodule NervesViewWeb.DashboardLiveTest do
   end
 
   test "layout buttons render and dashboard shows cameras", %{conn: conn} do
-    conn =
-      post(conn, ~p"/login", %{
-        "email" => "grid@example.com",
-        "password" => "password123"
-      })
+    conn = login_via_post(conn, "grid@example.com", "password123")
 
     assert redirected_to(conn) == ~p"/dashboard"
 
     conn = get(conn, ~p"/dashboard")
     html = html_response(conn, 200)
-    assert html =~ "Live multi-camera dashboard"
+    assert html =~ "Live Feed"
     assert html =~ "cam-grid"
-    assert html =~ "phx-value-layout=\"9\""
-    assert html =~ "Pipeline"
-    assert html =~ "Healthy"
-    assert html =~ "yes"
+    assert html =~ "phx-value-n=\"9\""
+    assert html =~ "Grid Cam"
   end
 end

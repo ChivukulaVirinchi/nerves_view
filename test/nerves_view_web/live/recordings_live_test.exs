@@ -14,11 +14,7 @@ defmodule NervesViewWeb.RecordingsLiveTest do
   end
 
   test "recordings page shows hls playback links", %{conn: conn} do
-    conn =
-      post(conn, ~p"/login", %{
-        "email" => "recordings@example.com",
-        "password" => "password123"
-      })
+    conn = login_via_post(conn, "recordings@example.com", "password123")
 
     assert redirected_to(conn) == ~p"/dashboard"
 

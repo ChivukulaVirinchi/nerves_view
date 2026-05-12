@@ -8,12 +8,18 @@ defmodule NervesView.Camera.Producer.Libcamera do
 
   use GenServer
 
+  import Bitwise
+  require Logger
+
   @behaviour NervesView.Camera.Producer
   @tick_ms 33
 
   # H.264 NAL start code patterns
   @start_code_4 <<0, 0, 0, 1>>
   @start_code_3 <<0, 0, 1>>
+
+  # H.264 NAL unit types
+  @nal_vcl_types 1..5
 
   @impl true
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
@@ -49,6 +55,8 @@ defmodule NervesView.Camera.Producer.Libcamera do
          sequence: 0,
          timestamp: 0,
          payload: <<>>,
+         au_queue: :queue.new(),
+         pending_nals: [],
          buffer: <<>>,
          port: port,
          exec: exec
@@ -59,7 +67,13 @@ defmodule NervesView.Camera.Producer.Libcamera do
   end
 
   @impl true
-  def handle_call(:snapshot, _from, state), do: {:reply, state, state}
+  def handle_call(:snapshot, _from, state) do
+    # Drain the access-unit queue. Each AU is `{nals, seq, ts}`. Callers that
+    # only need the latest payload use :payload (backward compat).
+    queued = :queue.to_list(state.au_queue)
+    snapshot = state |> Map.put(:au_queue, queued)
+    {:reply, snapshot, %{state | au_queue: :queue.new()}}
+  end
 
   @impl true
   def handle_info(:tick, state) do
@@ -80,21 +94,34 @@ defmodule NervesView.Camera.Producer.Libcamera do
 
     case extract_nal_units(buffer) do
       {[], rest} ->
-        # No complete NAL yet, keep buffering (cap buffer at 256KB to prevent OOM)
-        capped = if byte_size(rest) > 262_144, do: <<>>, else: rest
+        capped =
+          if byte_size(rest) > 262_144 do
+            Logger.warning(
+              "libcamera buffer overflow on #{state.source_path}: dropping #{byte_size(rest)} bytes"
+            )
+
+            <<>>
+          else
+            rest
+          end
+
         {:noreply, %{state | buffer: capped, healthy: true, last_error: nil}}
 
       {nal_units, rest} ->
-        # Take the latest complete NAL unit as the current frame payload
+        {pending, au_queue, seq, ts} =
+          group_into_aus(nal_units, state.pending_nals, state.au_queue, state.sequence, state.timestamp)
+
         latest_nal = List.last(nal_units)
 
         {:noreply,
          %{
            state
            | payload: latest_nal,
+             pending_nals: pending,
+             au_queue: au_queue,
              buffer: rest,
-             sequence: rem(state.sequence + 1, 65_535),
-             timestamp: rem(state.timestamp + 3_000, 4_294_967_295),
+             sequence: seq,
+             timestamp: ts,
              last_frame_at: System.system_time(:second),
              healthy: true,
              last_error: nil
@@ -103,7 +130,21 @@ defmodule NervesView.Camera.Producer.Libcamera do
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
-    {:noreply, %{state | healthy: false, last_error: {:libcamera_exit, status}}}
+    Logger.warning("libcamera-vid exited with status #{status}, restarting in 1s...")
+    Process.send_after(self(), :restart_port, 1_000)
+    {:noreply, %{state | port: nil, healthy: false, last_error: {:libcamera_exit, status}}}
+  end
+
+  def handle_info(:restart_port, state) do
+    case open_port(state.exec, 640, 480, 15) do
+      {:ok, new_port} ->
+        Logger.info("libcamera-vid restarted successfully")
+        {:noreply, %{state | port: new_port, buffer: <<>>, healthy: true, last_error: nil}}
+
+      {:error, reason} ->
+        Logger.error("libcamera-vid restart failed: #{inspect(reason)}")
+        {:noreply, %{state | healthy: false, last_error: reason}}
+    end
   end
 
   @impl true
@@ -114,6 +155,28 @@ defmodule NervesView.Camera.Producer.Libcamera do
 
     :ok
   end
+
+  # Walk NALs in order, grouping into access units. Non-VCL NALs (types 6/7/8/9
+  # — SEI/SPS/PPS/AUD) accumulate as pending parameter sets, then the next VCL
+  # NAL (types 1..5 — slice or IDR) closes the AU. Each closed AU advances the
+  # shared sequence_number and 90 kHz timestamp.
+  defp group_into_aus(nals, pending, queue, seq, ts) do
+    Enum.reduce(nals, {pending, queue, seq, ts}, fn nal, {pending, queue, seq, ts} ->
+      case nal_type(nal) do
+        type when type in @nal_vcl_types ->
+          au_nals = Enum.reverse([nal | pending])
+          next_seq = rem(seq + 1, 65_536)
+          next_ts = rem(ts + 6_000, 4_294_967_296)
+          {[], :queue.in({au_nals, next_seq, next_ts}, queue), next_seq, next_ts}
+
+        _non_vcl ->
+          {[nal | pending], queue, seq, ts}
+      end
+    end)
+  end
+
+  defp nal_type(<<header, _rest::binary>>), do: header &&& 0x1F
+  defp nal_type(_), do: 0
 
   # Split a binary buffer into complete NAL units.
   # Returns {completed_nal_units, remaining_buffer}.
@@ -172,8 +235,17 @@ defmodule NervesView.Camera.Producer.Libcamera do
   end
 
   defp kill_orphaned_libcamera_vid do
-    case System.cmd("pkill", ["-f", "libcamera-vid"], stderr_to_stdout: true) do
-      {_, _} -> :ok
+    case System.find_executable("pkill") do
+      nil ->
+        :ok
+
+      _pkill ->
+        try do
+          _ = System.cmd("pkill", ["-f", "libcamera-vid"], stderr_to_stdout: true)
+          :ok
+        rescue
+          _ -> :ok
+        end
     end
 
     Process.sleep(100)
@@ -187,12 +259,21 @@ defmodule NervesView.Camera.Producer.Libcamera do
   end
 
   defp open_port(exec, width, height, fps) do
+    # `--profile baseline` so the SPS profile_idc matches what the WebRTC SDP
+    # advertises (Constrained Baseline). Without it, libcamera defaults to
+    # High profile (640028) and browsers refuse to decode.
+    # `--intra 15` forces a keyframe every second at 15fps so a fresh viewer
+    # gets a tune-in point quickly instead of waiting up to ~4s.
     args = [
       "-t",
       "0",
       "--inline",
       "--codec",
       "h264",
+      "--profile",
+      "baseline",
+      "--intra",
+      to_string(fps),
       "--framerate",
       to_string(fps),
       "--width",

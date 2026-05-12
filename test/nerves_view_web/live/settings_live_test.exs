@@ -18,19 +18,14 @@ defmodule NervesViewWeb.SettingsLiveTest do
   end
 
   test "settings page shows add camera form", %{conn: conn} do
-    conn =
-      post(conn, ~p"/login", %{
-        "email" => "settings@example.com",
-        "password" => "password123"
-      })
+    conn = login_via_post(conn, "settings@example.com", "password123")
 
     assert redirected_to(conn) == ~p"/dashboard"
 
     conn = get(conn, ~p"/settings")
     html = html_response(conn, 200)
-    assert html =~ "Add camera"
+    assert html =~ "Add Camera"
     assert html =~ "camera[source_type]"
     assert html =~ "Diagnostics"
-    assert html =~ "No diagnostics yet"
   end
 end

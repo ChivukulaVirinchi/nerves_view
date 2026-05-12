@@ -55,8 +55,8 @@ defmodule NervesViewWeb do
 
   defp html_helpers do
     quote do
+      use SutraUI
       import Phoenix.HTML
-      import NervesViewWeb.CoreComponents
 
       alias Phoenix.LiveView.JS
 

@@ -155,6 +155,9 @@ defmodule NervesView do
   @spec list_users() :: [map()]
   def list_users, do: Store.list_users()
 
+  @spec first_boot?() :: boolean()
+  def first_boot?, do: list_users() == []
+
   @spec notify_motion_event(String.t(), non_neg_integer(), keyword()) ::
           {:ok, map()} | {:error, atom()}
   def notify_motion_event(camera_id, timestamp \\ System.system_time(:second), opts \\ []) do
@@ -217,5 +220,24 @@ defmodule NervesView do
         }
   def enforce_recording_retention(opts \\ []) do
     StorageManager.enforce_retention(opts)
+  end
+
+  # ── DVR ──
+
+  @spec dvr_segments(String.t(), non_neg_integer(), non_neg_integer()) :: [map()]
+  def dvr_segments(camera_id, from_ts, to_ts) do
+    NervesView.DVR.SegmentIndex.segments_for(camera_id, from_ts, to_ts)
+  end
+
+  @spec dvr_retention_window(String.t()) :: {non_neg_integer(), non_neg_integer()} | nil
+  def dvr_retention_window(camera_id) do
+    NervesView.DVR.SegmentIndex.retention_window(camera_id)
+  end
+
+  @spec dvr_playlist(String.t(), non_neg_integer()) :: String.t()
+  def dvr_playlist(camera_id, from_ts) do
+    now = System.system_time(:second)
+    segments = NervesView.DVR.SegmentIndex.segments_for(camera_id, from_ts, now + 60)
+    NervesView.DVR.PlaylistBuilder.build_vod(camera_id, segments)
   end
 end

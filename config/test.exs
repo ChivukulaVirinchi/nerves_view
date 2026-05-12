@@ -8,6 +8,12 @@ config :nerves_view, NervesViewWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,
   live_view: [signing_salt: "nervesviewsalt"]
 
+# Isolate test data from dev — tests call Store.clear() which would
+# otherwise wipe your dev accounts and sessions.
+config :nerves_view,
+  persistence_dir: "tmp/test_persistence",
+  recordings_path: "tmp/test_recordings"
+
 config :logger, level: :warning
 
 config :phoenix, :plug_init_mode, :runtime

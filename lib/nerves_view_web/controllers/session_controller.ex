@@ -1,34 +1,31 @@
 defmodule NervesViewWeb.SessionController do
   use NervesViewWeb, :controller
 
-  alias NervesView
-  alias NervesView.Security.RateLimiter
+  alias NervesView.Accounts.SessionStore
   alias NervesViewWeb.UserAuth
 
-  def create(conn, %{"email" => email, "password" => password} = params) do
-    with :ok <- rate_limit(conn, 10) do
-      do_create(conn, email, password, params)
-    else
-      {:error, :rate_limited} ->
-        conn
-        |> put_flash(:error, "Too many attempts, try again shortly.")
-        |> redirect(to: ~p"/login")
-    end
-  end
+  @handoff_max_age 30
 
-  defp do_create(conn, email, password, params) do
-    opts = remember_opts(params)
+  @doc """
+  Creates a session. Called via phx-trigger-action after LiveView
+  validates and authenticates the user. The LiveView passes a signed
+  handoff token so we don't re-authenticate here.
+  """
+  def create(conn, %{"user" => %{"handoff_token" => token} = params}) when is_binary(token) do
+    case Phoenix.Token.verify(NervesViewWeb.Endpoint, "auth_handoff", token,
+           max_age: @handoff_max_age
+         ) do
+      {:ok, user_id} ->
+        {:ok, session} = SessionStore.create(user_id, remember_opts(params))
 
-    case NervesView.login(email, password, opts) do
-      {:ok, %{session: session}} ->
         conn
         |> put_session(UserAuth.session_key(), session.token)
         |> put_flash(:info, "Welcome back!")
         |> redirect(to: ~p"/dashboard")
 
-      {:error, :invalid_credentials} ->
+      {:error, _} ->
         conn
-        |> put_flash(:error, "Invalid email or password.")
+        |> put_flash(:error, "Session expired. Please try again.")
         |> redirect(to: ~p"/login")
     end
   end
@@ -46,10 +43,5 @@ defmodule NervesViewWeb.SessionController do
   end
 
   defp remember_opts(%{"remember_me" => "true"}), do: [remember_me: true]
-  defp remember_opts(_params), do: []
-
-  defp rate_limit(conn, max_attempts) do
-    ip = to_string(:inet.ntoa(conn.remote_ip || {127, 0, 0, 1}))
-    RateLimiter.check("auth:#{ip}", max_attempts: max_attempts, window_seconds: 60)
-  end
+  defp remember_opts(_), do: []
 end

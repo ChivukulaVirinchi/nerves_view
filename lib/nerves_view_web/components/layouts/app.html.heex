@@ -1,23 +1,45 @@
-<div class="app-shell">
-  <header class="top-nav">
-    <div>
-      <a href={~p"/dashboard"} class="brand">NervesView</a>
-    </div>
-    <nav class="top-links">
-      <a href={~p"/dashboard"}>Dashboard</a>
-      <a href={~p"/recordings"}>Recordings</a>
-      <a href={~p"/settings"}>Settings</a>
-      <%= if @current_user do %>
-        <span class="user-email">{@current_user.email}</span>
-        <a href={~p"/logout"}>Logout</a>
-      <% else %>
-        <a href={~p"/login"}>Login</a>
-      <% end %>
+<div class="min-h-screen flex flex-col">
+  <header class="nv-nav px-4 h-12 flex items-center gap-4">
+    <a href={~p"/dashboard"} class="nv-brand shrink-0">
+      <span class="nv-dot"></span>
+      NervesView
+    </a>
+
+    <nav class="flex items-center gap-0.5 overflow-x-auto">
+      <.button
+        :for={
+          {label, path, title} <- [
+            {"Dashboard", ~p"/dashboard", "Dashboard"},
+            {"Recordings", ~p"/recordings", "Recordings"},
+            {"Settings", ~p"/settings", "Settings"}
+          ]
+        }
+        variant={if @page_title == title, do: "secondary", else: "ghost"}
+        size="sm"
+        navigate={path}
+      >
+        {label}
+      </.button>
     </nav>
+
+    <div class="flex items-center gap-1 ml-auto shrink-0">
+      <.theme_switcher id="ts" variant="ghost" size="sm" />
+      <%= if @current_user do %>
+        <span class="text-xs text-muted-foreground hidden sm:inline truncate max-w-36">
+          {@current_user.email}
+        </span>
+        <.button variant="ghost" size="sm" href={~p"/logout"}>Logout</.button>
+      <% end %>
+    </div>
   </header>
 
-  <main class="page-main">
-    <.flash_group flash={@flash} />
+  <main class="flex-1 px-4 py-5 sm:px-6 max-w-7xl w-full mx-auto">
+    <.flash kind={:info} flash={@flash} />
+    <.flash kind={:error} flash={@flash} />
     {@inner_content}
   </main>
+
+  <footer class="nv-footer">
+    NervesView &middot; {node()} &middot; {:erlang.system_info(:system_architecture)}
+  </footer>
 </div>

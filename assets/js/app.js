@@ -1,8 +1,12 @@
 import "phoenix_html"
 import { Socket } from "phoenix"
 import { LiveSocket } from "phoenix_live_view"
-import WebRTCPlayer from "./hooks/webrtc_player"
-import HLSPlayer from "./hooks/hls_player"
+import Hls from "../vendor/hls.min.js"
+import CameraPlayer from "./hooks/camera_player"
+import TimelineScrubber from "./hooks/timeline_scrubber"
+
+// Make Hls available globally for the CameraPlayer hook
+window.Hls = Hls
 
 const csrfToken = document
   .querySelector("meta[name='csrf-token']")
@@ -11,8 +15,8 @@ const csrfToken = document
 const liveSocket = new LiveSocket("/live", Socket, {
   params: { _csrf_token: csrfToken },
   hooks: {
-    WebRTCPlayer,
-    HLSPlayer,
+    CameraPlayer,
+    TimelineScrubber,
   },
 })
 
