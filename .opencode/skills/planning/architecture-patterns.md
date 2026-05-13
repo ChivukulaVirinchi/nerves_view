@@ -1,0 +1,1493 @@
+# Architecture Patterns — depth reference
+
+Architectural principles and styles for Elixir applications: hexagonal, layered, modular monolith, event-driven, CQRS, composition vocabulary, boundary opacity, and polymorphism decisions. Merges the inline overview from SKILL.md §4 (Architectural Principles) and §12 (Architectural Styles) with deep walkthroughs, worked examples, common mistakes, and migration paths.
+
+> **Routing:** [SKILL.md](SKILL.md) §2 — Master Decision Table, rows 3.7 (Integration boundaries) and 3.9 (Architectural style).
+
+**Related:**
+- [process-topology.md](process-topology.md) — how the architectural style maps to supervision trees
+- [integration-patterns.md](integration-patterns.md) — inter-context communication patterns used by each style
+- [building-blocks.md](building-blocks.md) — seven-axis building-block checklist, composition payoff
+- `elixir-implementing` §10 — implementing contexts and boundaries (the code-level view)
+
+---
+
+## Overview & Quick Reference
+
+### The eleven architectural principles
+
+| # | Principle | Core idea |
+|---|---|---|
+| 1 | **Dependencies point inward** | Interface->Domain->nothing. Infrastructure implements contracts the Domain defines. Domain must never alias/import framework modules. |
+| 2 | **Behaviours are ports, implementations are adapters** | Every external dependency (DB, API, email, hardware) sits behind a `@callback` behaviour the domain owns. Config picks the impl. |
+| 3 | **Side effects live in infrastructure** | The ideal. Phoenix contexts intentionally mix Repo into domain-adjacent modules. For non-Repo side effects (HTTP, email, I/O), apply the boundary. |
+| 4 | **The supervision tree IS the architecture** | Start order = dependency order. Strategy encodes coupling. |
+| 5 | **Error kernel design** | Stable, critical-state processes near the top; volatile workers below. |
+| 6 | **Pure core, impure shell** | GenServers own process mechanics; pure functions own domain logic. |
+| 7 | **One reason to change per boundary module** | If a module changes for both business rules AND DB schema reasons, it has too many responsibilities. |
+| 8 | **Design for replaceability** | Can you swap a component's implementation without touching business logic? If not, add a behaviour at the boundary. |
+| 9 | **Small, focused behaviours** | Prefer `Chargeable` + `Refundable` + `Subscribable` over one 20-callback `PaymentGateway`. |
+| 10 | **The testability test** | If you can't test a business rule without a DB, web server, or external service, the architecture has a boundary problem. |
+| 11 | **Scream the domain** | Top-level module names reflect business (`Accounts`, `Catalog`, `Billing`) not technical (`Controllers`, `Services`, `Helpers`). |
+
+### Architectural style quick decision
+
+| Problem You Have | Style | Elixir Solution |
+|---|---|---|
+| Separate UI from logic | MVC | Thin dispatchers -> contexts -> structs (Elixir default) |
+| Swappable external dependencies | Hexagonal / Ports & Adapters | Behaviours (ports) + implementations (adapters) + config |
+| Fault isolation without separate deployments | Modular Monolith | Contexts + supervision trees (OTP default) |
+| Decouple producers from consumers | Event Notification | PubSub / `:pg` -- fire and forget |
+| Complete audit trail / state replay | Event Sourcing | Commanded -- events are source of truth |
+| Read and write patterns diverge | CQRS | Query modules, read replicas, or projections |
+| Backpressure between fast producer and slow consumer | Demand-Driven | GenStage / Broadway |
+| Side effects must survive crashes | Persistent Queue | Oban |
+| Different language / compliance / extreme scaling | Microservices | Separate deployments -- last resort in Elixir |
+
+**The default Elixir architecture** -- contexts + supervision + behaviours -- already gives you MVC, hexagonal, and modular monolith patterns simultaneously. Most apps never need anything beyond this plus PubSub.
+
+### Composition vocabulary (design-time decisions)
+
+| Mechanism | Composes... | Elixir shape |
+|---|---|---|
+| **Pipeline** (`\|>`) | Eager data transformations | Subject-first functions threaded through `\|>` |
+| **Stream** | Lazy / unbounded data | `Stream.*` chain ending in one terminal `Enum.*` |
+| **Threading-builder** | Accumulating state (fixed type) | `Multi.new() \|> Multi.insert() \|> Repo.transaction()` |
+| **Railway / `with`-chain** | Sequential ok/error operations | `with {:ok, _} <- f(), {:ok, _} <- g(_)` |
+| **Protocol / Behaviour** | Type or module dispatch | `defprotocol` / `@callback` |
+| **Process / GenServer** | Stateful or concurrent collaborators | Supervised processes |
+
+Pick at planning time; commit at module-creation time. See §4.7 in the deep reference below for the full treatment including effects-as-data, capability passing, smart constructors, and memoization.
+
+---
+
+## Deep Reference
+
+---
+
+## 1. Rules for applying architectural styles (LLM)
+
+1. **ALWAYS start with contexts + supervision + behaviours** — the Elixir default IS modular monolith + hexagonal + layered simultaneously. Most apps never need anything more. See §3.
+2. **NEVER adopt a style because it's "sophisticated."** Each style solves a specific problem. If you don't have that problem, the style is overhead.
+3. **ALWAYS name the problem before picking the style.** If you can't describe the problem in one sentence, you don't have a justifying problem yet.
+4. **NEVER apply a single style uniformly to every context.** Different contexts can use different styles. The `Accounts` context might be simple CRUD; the `Orders` context might be event-sourced. Both live in the same app.
+5. **ALWAYS draw the supervision tree when designing.** If your architectural style doesn't have a clear supervision-tree expression, you're not thinking in BEAM terms.
+6. **PREFER composition of simple styles over one complex style.** Layered + hexagonal + PubSub beats "enterprise event-driven CQRS microservices."
+7. **ALWAYS design for replaceability at boundaries.** Behaviours (ports) + adapters is the default way to express boundaries in Elixir. If you can't swap an implementation without touching business logic, the boundary is missing.
+8. **NEVER couple domain to framework.** Phoenix is infrastructure. Ecto is infrastructure. Logic should not depend on them directly — it should depend on domain contracts (behaviours) that infrastructure implements.
+9. **NEVER split a modular monolith to gain "coupling" benefits** — OTP supervision and behaviours give you loose coupling without network hops. Split only for different languages, compliance isolation, separate teams/release cycles, or extreme scaling differences.
+
+---
+
+## 2. Style decision tree
+
+When you have an architectural problem, walk the tree top-down.
+
+```
+What's the actual problem?
+
+1. "I'm starting a new Elixir project and don't know where to put things."
+   → Modular monolith (default). Go to §3. DO NOT read further.
+
+2. "I need to swap external dependencies (DB, APIs, hardware) for test or future migration."
+   → Hexagonal. Go to §4. (You'll also use the modular monolith as the container.)
+
+3. "I want clear separation between UI/input, domain logic, and infrastructure."
+   → Layered. Go to §5. (Compatible with modular monolith + hexagonal.)
+
+4. "Contexts need to react to events from other contexts without tight coupling."
+   → Event-driven. Go to §6. Pick the variant that fits:
+     - Minimal coupling, loss OK            → Event Notification (6.1)
+     - Subscribers shouldn't call back      → Event-Carried State Transfer (6.2)
+     - Need audit trail / replay / compliance → Event Sourcing (6.3)
+
+5. "Read patterns diverge from write patterns in one context."
+   → CQRS. Go to §7. Pick the level:
+     - Standard CRUD with distinct queries  → Level 1: Light CQRS (7.1)
+     - Queries contend with writes          → Level 2: Separated Read Path (7.2)
+     - Multiple very different read stores  → Level 3: Full CQRS + Projections (7.3)
+
+6. "I need to split for a CONCRETE non-tech reason (language, compliance, team, scaling asymmetry)."
+   → Microservices. Go to §8. (Rarely justified in Elixir.)
+
+7. "My question isn't here."
+   → The existing styles don't fit? Describe the problem in issue/doc form and get
+     another pair of eyes. Don't invent a new style — you're probably missing one of the above.
+```
+
+---
+
+## 3. Modular monolith (the Elixir default)
+
+The Elixir default. One Mix application. Multiple contexts (boundary modules). One supervision tree. One deployable.
+
+### 3.1 What it gives you
+
+| Concern | Modular monolith solves it via |
+|---|---|
+| Fault isolation | Supervision trees |
+| Loose coupling | Contexts (public API) + behaviours (ports) |
+| Independent scaling | Process pools, `Task.async_stream`, Broadway |
+| Service discovery | Registry / `:pg` / named processes |
+| Observability | `:telemetry` events per context |
+| Deploy simplicity | One Mix release, zero network hops |
+
+Everything microservices claim to solve, BEAM + modular monolith solves at lower cost.
+
+### 3.2 Canonical structure
+
+```
+my_app/
+├── lib/
+│   ├── my_app/
+│   │   ├── application.ex             # Supervision tree
+│   │   ├── repo.ex
+│   │   ├── accounts.ex                # Context: public API
+│   │   ├── accounts/
+│   │   │   ├── user.ex                # Schema (internal — @moduledoc false)
+│   │   │   ├── session.ex
+│   │   │   └── password_reset.ex
+│   │   ├── catalog.ex                 # Another context
+│   │   ├── catalog/
+│   │   │   ├── product.ex
+│   │   │   └── category.ex
+│   │   ├── orders.ex
+│   │   ├── orders/
+│   │   │   ├── order.ex
+│   │   │   ├── line_item.ex
+│   │   │   └── workflow.ex
+│   │   ├── mailer.ex                  # Behaviour (port)
+│   │   └── mailer/
+│   │       └── swoosh.ex              # Adapter
+│   └── my_app_web/                    # Interface layer
+│       ├── endpoint.ex
+│       ├── router.ex
+│       ├── controllers/
+│       └── live/
+├── config/
+├── test/
+└── mix.exs
+```
+
+**Rules:**
+
+- `lib/my_app/` is the domain. `lib/my_app_web/` is the interface.
+- Each context is a single file (`accounts.ex`) with internal modules in a subdirectory (`accounts/`).
+- Internal modules are `@moduledoc false` and never called from outside the context.
+- The only cross-context communication is through public APIs (`Accounts.register/1`).
+
+### 3.3 When modular monolith is not enough
+
+Very few cases. Watch for these smells:
+
+| Smell | What it actually means | Action |
+|---|---|---|
+| Large team stepping on each other's files | You need clearer context boundaries, or separate CI test targets | Add contexts; use CODEOWNERS |
+| Different subsystems have wildly different deploy cadences | You might need separate releases from one umbrella | Consider umbrella (one repo, multiple release targets) |
+| One subsystem is 100× the CPU / memory of the rest | Separate process tree under its own supervisor; possibly separate release | Plan an umbrella or separate deploy |
+| Different languages needed (Python ML, Rust compute) | NIF via Rustler, or separate service | Separate service only if NIF is inadequate |
+| Regulatory isolation (PCI, HIPAA) | Separate deploy for the regulated subsystem | Microservice, reluctantly |
+
+**Never split for:**
+
+- "It feels big" → add contexts
+- "We want loose coupling" → use behaviours
+- "We want fault isolation" → use supervision
+
+### 3.4 Context design within a modular monolith
+
+See `SKILL.md §6` for the full decision framework. Summary:
+
+**Create a new context when:**
+- Different business domain (Accounts vs Catalog)
+- Different team ownership
+- Distinct data lifecycle
+- Different consistency requirements
+
+**Merge contexts when:**
+- Operations always happen in the same transaction
+- Entities share an aggregate root
+- Constant cross-context calls (you have a boundary misalignment)
+
+### 3.5 Context as building-block + orchestrator
+
+> **Depth:** [building-blocks.md](building-blocks.md) — full seven-axis checklist, classification decision tree, refactor patterns.
+
+A context that maximizes its "building-block surface" is one that
+composes well, property-tests cleanly, and stays maintainable as it
+grows. Rather than treating a context as a single monolithic public
+API, design it as **two layers**:
+
+```
+lib/my_app/catalog.ex                   # Building-block — public pure API
+lib/my_app/catalog/product.ex           # Building-block — schema + changesets (pure)
+lib/my_app/catalog/price_calculator.ex  # Building-block — math
+lib/my_app/catalog/sku_normalizer.ex    # Building-block — pure transforms
+lib/my_app/catalog/workflow.ex          # Orchestrator — Repo, telemetry, PubSub
+```
+
+The **building-block layer** (everything except `workflow.ex`) has:
+- No `Repo` calls
+- No `Logger` / `:telemetry` / `Phoenix.PubSub`
+- No `Application.get_env` / `Process.get` / `:persistent_term`
+- No `DateTime.utc_now` / random / unique-id
+- Every public function has a `@spec`
+- Every public function returns ok/error tuples (never raises)
+- Every public function constrains its input domain (guards or
+  specific patterns)
+
+The **orchestrator layer** (`workflow.ex`) connects the building-block
+layer to side effects. It's small — a few functions — and explicitly
+named. Tests for the orchestrator use DataCase + Mox; tests for the
+building-block layer are plain ExUnit / property tests.
+
+**Why this matters at the planning stage:**
+- Decide upfront which functions live where. Mixing them mid-implementation
+  produces "this module is hard to test" — the dominant cost in
+  Phoenix codebases.
+- The classification fits Archdo's `Blackbox.context_verdict/2`: a context
+  is a building-block iff every module under its namespace passes the
+  building-block checklist.
+- Property-test ROI: building-block modules are the natural target for
+  StreamData. If you can't write a property test for a context's domain
+  module, the module is leaking — and you don't know it until you try.
+
+**When a context CAN'T be a building-block:**
+- Authentication / session — every login mutates the DB
+- Background-job dispatch — enqueues, schedules, and runs effectful work
+- Real-time connection lifecycle — PubSub subscribe/publish
+
+These are honest orchestrator-contexts. Don't fight it; document it
+in the context module's moduledoc:
+
+```elixir
+defmodule MyApp.Sessions do
+  @moduledoc """
+  Orchestrator context — authenticates users and tracks live
+  sessions. Effects: DB writes (insert session), telemetry, Mailer.
+  Pure rules live in `MyApp.Sessions.Rules` (building-block).
+  """
+end
+```
+
+**Aim point** for a typical Phoenix app: ≥ 60% of `lib/my_app/`
+modules are building-blocks; ≥ 80% of pure-domain modules. Use
+`Archdo.Blackbox.context_verdict/2` quarterly to track drift.
+
+---
+
+## 4. Hexagonal Architecture (Ports & Adapters)
+
+**Hexagonal** = put every external dependency behind a contract. Domain talks to contracts. Adapters implement them.
+
+### 4.1 The concepts in Elixir terms
+
+| Hexagonal concept | Elixir implementation |
+|---|---|
+| **Port** (the contract) | `@callback` behaviour |
+| **Adapter** (the implementation) | Module implementing the behaviour |
+| **Domain core** | Context modules, pure functions |
+| **Driving adapter** (input) | Phoenix controller, LiveView, CLI, GraphQL |
+| **Driven adapter** (output) | Repo, HTTP client, email, file I/O, hardware, pubsub |
+| **Selection** | `Application.compile_env` (app) or `Application.get_env` (library) |
+
+**Elixir gets hexagonal for free via behaviours. You do not need a framework.**
+
+### 4.2 Canonical hexagonal example — payment gateway
+
+```elixir
+# === PORT (behaviour — the contract owned by the domain) ===
+defmodule MyApp.Billing.PaymentGateway do
+  @moduledoc "Port — billing context contracts for payment gateways."
+
+  @callback charge(amount :: Decimal.t(), token :: String.t()) ::
+              {:ok, %{transaction_id: String.t(), captured_at: DateTime.t()}}
+              | {:error, :card_declined | :card_expired | :payment_failed | term()}
+
+  @callback refund(transaction_id :: String.t()) ::
+              :ok | {:error, :not_found | :already_refunded | term()}
+end
+
+# === DRIVEN ADAPTER — Stripe ===
+defmodule MyApp.Billing.PaymentGateway.Stripe do
+  @behaviour MyApp.Billing.PaymentGateway
+
+  @impl true
+  def charge(amount, token) do
+    case Stripe.Charge.create(%{amount: amount, source: token, currency: "usd"}) do
+      {:ok, charge} -> {:ok, to_domain_result(charge)}
+      {:error, err} -> {:error, to_domain_error(err)}
+    end
+  end
+
+  @impl true
+  def refund(transaction_id) do
+    case Stripe.Refund.create(%{charge: transaction_id}) do
+      {:ok, _} -> :ok
+      {:error, %{code: "charge_already_refunded"}} -> {:error, :already_refunded}
+      {:error, _} -> {:error, :refund_failed}
+    end
+  end
+
+  # --- Translation layer (anti-corruption) ---
+  defp to_domain_result(charge) do
+    %{transaction_id: charge.id, captured_at: DateTime.utc_now()}
+  end
+
+  defp to_domain_error(%{code: "card_declined"}), do: :card_declined
+  defp to_domain_error(%{code: "expired_card"}), do: :card_expired
+  defp to_domain_error(_), do: :payment_failed
+end
+
+# === DRIVEN ADAPTER — Mock (for tests) ===
+# Generated by Mox.defmock(MyApp.Billing.PaymentGateway.Mock, for: MyApp.Billing.PaymentGateway)
+
+# === SELECTION ===
+# config/config.exs
+config :my_app, :payment_gateway, MyApp.Billing.PaymentGateway.Stripe
+
+# config/test.exs
+config :my_app, :payment_gateway, MyApp.Billing.PaymentGateway.Mock
+
+# === DOMAIN (uses the port, not the adapter) ===
+defmodule MyApp.Billing do
+  @gateway Application.compile_env!(:my_app, :payment_gateway)
+
+  @spec charge_order(Order.t()) :: {:ok, Order.t()} | {:error, term()}
+  def charge_order(order) do
+    with {:ok, result} <- @gateway.charge(order.amount, order.payment_token),
+         {:ok, order} <- mark_charged(order, result.transaction_id) do
+      {:ok, order}
+    end
+  end
+end
+```
+
+**Key points:**
+
+- The port (`MyApp.Billing.PaymentGateway`) is owned by the domain (`MyApp.Billing`).
+- The adapter (`Stripe`) lives outside the domain — in `lib/my_app/billing/payment_gateway/stripe.ex` or `lib/my_app/infrastructure/payment_gateway/stripe.ex`.
+- Adapter translates Stripe's data model into the domain's data model (anti-corruption layer).
+- Domain code never sees Stripe types — only domain types.
+- Tests use Mox against the same behaviour → zero changes to domain code.
+
+### 4.3 When to apply hexagonal
+
+**Apply hexagonal at every external boundary** (not just the "important" ones):
+
+| External dependency | Port behaviour | Typical adapters |
+|---|---|---|
+| Database | `Ecto.Adapter` (built-in) | Postgres, MySQL, SQLite |
+| HTTP client | `MyApp.HTTPClient` | `Req`, `Finch`, `HTTPoison` |
+| Email | `MyApp.Mailer` | `Swoosh`, `Bamboo`, `SendGrid`-direct |
+| Payment | `MyApp.PaymentGateway` | Stripe, Adyen, Mock |
+| Push notifications | `MyApp.Notifier` | APNS, FCM, null |
+| Hardware (Nerves) | `MyApp.SensorReader` | I2C/SPI adapter, mock |
+| AI / LLM | `MyApp.LLM` | OpenAI, Anthropic, Bedrock, local |
+| S3 / object storage | `MyApp.ObjectStore` | AWS S3, MinIO, local fs |
+| SMS | `MyApp.SMS` | Twilio, Vonage |
+| Analytics | `MyApp.Analytics` | Segment, Mixpanel, null |
+
+**Do NOT create a port for:**
+- Standard library (`String`, `Enum`, `File` when used normally)
+- Internal context-to-context calls (use the context's public API directly)
+- One-off reads of simple resources (unless the read is fallible and you want to swap it)
+
+### 4.4 Hexagonal rules
+
+1. **The port is owned by the domain that uses it.** Do not put `MyApp.PaymentGateway` in a generic `lib/common/` — put it in `lib/my_app/billing/`.
+2. **The adapter translates to domain types at the boundary.** Never let foreign types leak into domain code.
+3. **The port is as small as possible.** If `Billing` uses `charge/2` and `refund/1`, do not add `subscribe/2` and `list_transactions/1` to the same behaviour just because Stripe supports them.
+4. **Config selects the adapter.** `Application.compile_env` for apps; `Application.get_env` for libraries (see [../implementing/SKILL.md](../implementing/SKILL.md) §8.6).
+5. **Test with Mox against the same behaviour.** One behaviour, N adapters, including a Mock for tests. Zero changes to domain code between environments.
+
+### 4.5 Common mistakes with hexagonal
+
+**Mistake 1: The "generic Repo" anti-port.**
+
+```elixir
+# BAD — port too generic; adapter does too much
+defmodule MyApp.Storage do
+  @callback store(key :: term(), value :: term()) :: :ok
+  @callback fetch(key :: term()) :: {:ok, term()} | {:error, :not_found}
+end
+```
+
+This port tries to abstract "storage" generically. The adapter (`Storage.Ecto`, `Storage.ETS`) would end up with wildly different semantics and error modes. Instead, put specific domain operations behind specific ports: `MyApp.Accounts.UserRepo`, `MyApp.Catalog.ProductSearch`.
+
+**Mistake 2: Port in the wrong place.**
+
+```elixir
+# BAD — port under infrastructure
+defmodule MyApp.Infrastructure.PaymentGateway do
+  @callback charge(...) :: ...
+end
+
+# GOOD — port under the domain that uses it
+defmodule MyApp.Billing.PaymentGateway do
+  @callback charge(...) :: ...
+end
+```
+
+The port is a domain contract. It belongs in the domain directory.
+
+**Mistake 3: Adapter leaks foreign types.**
+
+```elixir
+# BAD — adapter returns Stripe's native type
+@impl true
+def charge(amount, token) do
+  Stripe.Charge.create(%{amount: amount, source: token})  # returns {:ok, %Stripe.Charge{}}
+end
+# Domain code now depends on %Stripe.Charge{} — hexagonal benefit lost
+
+# GOOD — adapter translates to domain type
+@impl true
+def charge(amount, token) do
+  case Stripe.Charge.create(%{amount: amount, source: token}) do
+    {:ok, %Stripe.Charge{} = charge} -> {:ok, to_domain_result(charge)}
+    {:error, err} -> {:error, to_domain_error(err)}
+  end
+end
+```
+
+**Mistake 4: Using a protocol when you should use a behaviour.**
+
+Protocols dispatch on data type. Behaviours dispatch on module identity chosen at config time. For external adapters (you want to swap at runtime/config-time based on environment), use a behaviour. Use a protocol when you want different data types to share an interface (Enumerable, Jason.Encoder).
+
+See §4.7 below for the full decision framework.
+
+### 4.7 Behaviour vs Protocol — the polymorphism decision
+
+These are Elixir's two polymorphism mechanisms. Getting this choice right shapes the architecture.
+
+**The fundamental difference:**
+
+| Mechanism | Dispatches on | Swapped by | Example |
+|---|---|---|---|
+| **Behaviour** | The **module** the caller invokes | Config, explicit argument, compile-time constant | `Plug`, `GenServer`, `MyApp.Storage` → `Redis` or `Mock` |
+| **Protocol** | The **data type** of the first argument | Adding a `defimpl` for a new type | `Enumerable`, `Jason.Encoder`, `String.Chars` |
+
+**Decision table — which to use?**
+
+| When you need to… | Use | Why |
+|---|---|---|
+| Swap implementation per environment (real vs test) | **Behaviour** | Config chooses the module; Mox generates a test double |
+| Plug in different strategies by config (SMTP vs SendGrid vs test) | **Behaviour** | The strategy IS a module, not data |
+| Allow multiple data types to share a method (`render/1`, `encode/1`, `to_string/1`) | **Protocol** | Dispatch comes from the value's type, not a config flag |
+| Extend a framework (implement GenServer/Plug/Supervisor) | **Behaviour** | Framework defines the contract; you provide the module |
+| Add support for a new type to an existing API you don't own | **Protocol** | You can `defimpl Jason.Encoder, for: MyStruct` without touching Jason |
+| Separate ports from adapters (hexagonal) | **Behaviour** | Port = behaviour, adapter = module implementing it |
+| Offer derived defaults via `@derive` on user structs | **Protocol** | `@derive` is protocol-only |
+| Need compile-time checks that all impls exist | **Behaviour** | `@impl true` + missing-callback warnings |
+| Need runtime-pluggable behaviour per entity (not per env) | **Protocol on struct** (see below) | Each struct carries its own implementation |
+| Dispatch across many types with **no** sensible default | **Protocol without fallback** | Enumerable, Collectable — fail loudly on non-implementers |
+| Single implementation today, "in case" abstraction | **Neither** — plain module | Add the behaviour only when a second impl exists |
+
+**"Plain module" is the default.** Introducing either polymorphism mechanism has costs (cognitive, performance consolidation, test fixtures). Introduce when a real second implementation or test double exists — not "just in case".
+
+### 4.8 Protocol-on-struct — strategy/plugin dispatch (AshAuthentication pattern)
+
+When you want runtime-pluggable behaviour per entity (not per environment), neither plain behaviour nor plain protocol fits cleanly. The pattern:
+
+1. Each strategy is a **struct**.
+2. A **protocol** is implemented for each strategy struct.
+3. Dispatch happens on the struct — the caller just has a `%Strategy{}` value; the protocol handles the rest.
+
+```elixir
+# Define the protocol — the dispatch surface
+defprotocol MyApp.AuthStrategy do
+  @spec authenticate(t(), credentials :: map()) :: {:ok, user()} | {:error, term()}
+  def authenticate(strategy, credentials)
+
+  @spec name(t()) :: String.t()
+  def name(strategy)
+end
+
+# Each strategy is a struct
+defmodule MyApp.Strategies.Password do
+  defstruct [:hash_algorithm, :min_length]
+
+  defimpl MyApp.AuthStrategy do
+    def name(_), do: "Password"
+    def authenticate(%{hash_algorithm: alg}, %{email: e, password: p}), do: ...
+  end
+end
+
+defmodule MyApp.Strategies.Oauth do
+  defstruct [:provider, :client_id, :client_secret]
+
+  defimpl MyApp.AuthStrategy do
+    def name(%{provider: p}), do: "OAuth (#{p})"
+    def authenticate(%{provider: p}, %{code: code}), do: ...
+  end
+end
+
+# Config holds strategy structs — which are swapped freely at runtime
+config :my_app, :auth_strategies, [
+  %MyApp.Strategies.Password{hash_algorithm: :argon2, min_length: 12},
+  %MyApp.Strategies.Oauth{provider: :github, client_id: "...", client_secret: "..."}
+]
+
+# Usage — dispatch on the strategy value, not a module atom
+for strategy <- Application.fetch_env!(:my_app, :auth_strategies) do
+  case MyApp.AuthStrategy.authenticate(strategy, creds) do
+    {:ok, user} -> user
+    {:error, _} -> nil
+  end
+end
+```
+
+**Why this beats plain behaviour:** strategies can be configured with state (hash algorithm, OAuth credentials) that travels with the dispatch. You don't need a separate registry of "which module implements which OAuth provider with what config." The struct carries both identity and configuration.
+
+**Why this beats plain protocol:** the protocol is explicitly designed as an extension point — new strategies add a struct + defimpl, no need to modify existing code.
+
+**When to reach for this:**
+- Ash extension system (authentication strategies, notifiers, policies).
+- Plugin architectures where users ship their own extensions as structs with `defimpl`.
+- Per-tenant / per-feature-flag pluggable behaviour.
+- Any case where a **value-object** IS the strategy (not just a module name).
+
+### 4.9 Behaviour design — defining the contract
+
+When designing a behaviour, resist the urge to copy the full surface of the underlying library. The behaviour should express what the **domain** needs, not what the library provides.
+
+**Guidelines:**
+
+1. **Narrow the surface.** If the domain only needs `put/get/delete`, don't include `keys/0`, `incr/2`, `expire/2`, etc. Extend later.
+2. **Return domain types, not library types.** Translate `%Stripe.Charge{}` to `%Payment{}` at the adapter boundary, not at every call site.
+3. **Use `@optional_callbacks` sparingly.** Each optional callback is a `function_exported?` check at the call site — the flow control becomes implicit.
+4. **Version via new modules, not new callbacks.** Adding a required callback to an existing behaviour breaks all implementors. Prefer `MyApp.Storage.V2` as a new behaviour, OR make the new callback optional.
+5. **Don't leak transport concerns.** The behaviour describes what, not how. If the interface mentions `:http_status`, it's too close to HTTP.
+6. **Reflection ≠ dispatch — keep meta operations on their own callbacks.** When a behaviour has a main dispatch callback (e.g. `execute(instruction, a, b)`), don't overload it with reflection operations like "list instructions" via a sentinel value. Give reflection its own 0-arity callback (`instructions/0`, `capabilities/0`, `describe/0`).
+
+**BAD — reflection overloaded onto dispatch:**
+
+```elixir
+@callback execute(instruction :: atom(), a :: term(), b :: term()) ::
+            {:ok, {:result, term()}} | {:ok, {:instructions, [atom()]}} | {:error, term()}
+
+# Forces callers to pass dummy a/b just to ask "what can you do?":
+execute(:list_instructions, 0, 0)   # dummy ints — semantically irrelevant
+
+# And forces the implementation to validate a/b BEFORE it can realize the
+# caller didn't need them, or complicates the validation order.
+```
+
+**GOOD — reflection has its own callback:**
+
+```elixir
+@callback execute(instruction(), a(), b()) :: {:ok, output()} | {:error, error()}
+@callback instructions() :: [instruction(), ...]
+
+# Clean, typed, no dummies:
+Mod.instructions()           # reflection — pure, no args
+Mod.execute(:add, 2, 3)      # dispatch — all args meaningful
+```
+
+**Why this matters:** the overloaded form couples reflection to argument validation. Tests need to carry "valid dummy inputs" just to exercise the reflection path. Multiple signals should be multiple callbacks.
+
+**Example — good behaviour design:**
+
+```elixir
+defmodule MyApp.PaymentGateway do
+  @moduledoc """
+  Minimal contract for charging customers. Adapters translate
+  gateway-specific errors to domain errors.
+  """
+
+  @type amount :: pos_integer()        # cents
+  @type currency :: :usd | :eur | :gbp
+  @type customer_id :: String.t()
+
+  @type charge :: %{
+          id: String.t(),
+          amount: amount(),
+          currency: currency(),
+          status: :succeeded | :pending | :failed
+        }
+
+  @type error ::
+          :insufficient_funds
+          | :card_declined
+          | :invalid_customer
+          | {:gateway_error, term()}
+
+  @callback charge(customer_id(), amount(), currency()) :: {:ok, charge()} | {:error, error()}
+  @callback refund(charge_id :: String.t()) :: :ok | {:error, error()}
+end
+```
+
+**This contract is domain-shaped:** amounts in cents, enumerated currencies, bounded error set. An adapter for Stripe or Adyen translates gateway-specific details into this shape.
+
+### 4.10 Contract evolution
+
+When a behaviour is in use, adding callbacks is a breaking change. Strategies:
+
+| Change | Breaking? | How to evolve |
+|---|---|---|
+| Add a required `@callback` | Yes | Make it `@optional_callbacks` first; migrate implementors; then make required |
+| Remove a `@callback` | Yes | Stop calling it; deprecate; remove in the next major |
+| Change an arg type | Yes | Add a new callback with the new signature; deprecate the old |
+| Add a new behaviour (superset) | No | Create `MyApp.Storage.V2`; route calls |
+| Add `@optional_callbacks` | No | Existing implementors don't need to act |
+
+**`@deprecated` attributes** in the behaviour module are picked up by Dialyzer and docs tooling.
+
+### 4.11 "Behaviour spam" — when NOT to create a behaviour
+
+Symptoms that a behaviour is premature:
+
+- Only one implementation exists and no test double is planned.
+- The behaviour's surface is a 1-to-1 copy of one library's API.
+- You introduced a behaviour to "enable testing" but the tests mock your own module (see `../reviewing/anti-patterns-catalog.md` E3).
+- Every parameter is `any()` because the behaviour doesn't actually narrow the interface.
+
+**Replace with a plain module** until you have a second real implementation or a clear test-double use case.
+
+### 4.12 Boundary opacity — exposed structs vs opaque handles
+
+A context boundary has TWO contracts: **functions** (covered in §4.7–§4.11) and **the data structures those functions accept and return**. Both are public API. Both can be public or hidden. The function side is well-understood — define `@callback`, accept and return them. The data side is where most Elixir codebases trip: a context exposes a struct, callers pattern-match on the fields, and now the struct's *internal layout* has become public API. Renaming an index field becomes a breaking change.
+
+This section is the planning decision: **for each struct that crosses your context boundary, decide whether its field shape is part of the public contract or an implementation detail.** Get it wrong and you'll discover later — when you want to swap the underlying storage, change the index shape, or add a new representation — that 11 callers destructure your "internal" struct and you have to rewrite all of them.
+
+#### 4.12.1 The two patterns from the Elixir stdlib + Phoenix/Ecto
+
+Real Elixir libraries split cleanly into two camps. Recognize which side a candidate struct belongs to *before* writing the first caller:
+
+| Camp | "Opaque handle" | "Public data structure" |
+|---|---|---|
+| Examples | `MapSet`, `Date.Range`, `Decimal`, `Ecto.Query`, `Ecto.Changeset` (mostly), `Regex`, `URI` (return value of `URI.parse/1`), `:queue`, `:gb_trees`, `:dets` table refs | `Plug.Conn`, `Date`, `Time`, `DateTime`, `NaiveDateTime`, `Ecto.Changeset` (`changeset.errors`, `changeset.changes`), `Phoenix.Socket`, `Ecto.Schema` user structs |
+| Field access from outside | Forbidden — by `@opaque` declaration AND/OR documentation prose ("the struct fields are private and must not be accessed directly") | Encouraged — `date.year`, `conn.assigns`, `changeset.errors` are documented public API |
+| How callers operate on it | Through accessor functions: `MapSet.size/1`, `Ecto.Query.from/2`, `URI.merge/2` | Through field access AND helper functions both: `conn.assigns[:user]`, `Plug.Conn.assign(conn, :user, u)` |
+| Underlying representation | **Free to change** between releases — that's the whole point | **Locked** — adding a field is the only safe change; renaming or removing is breaking |
+| Pattern-match on the struct? | Only `match?(%X{}, value)` to verify type — never destructure fields | Yes, freely: `def f(%Plug.Conn{request_path: "/" <> rest})` |
+
+**MapSet's actual rule (from official docs):** *"the struct fields are private and must not be accessed directly; use the functions in this module to perform operations on sets."* No `@opaque` — but the convention is enforced by code review and documentation.
+
+**Ecto.Query's actual rule (from official docs):** *"Users of Ecto must consider this struct as opaque and not access its field directly. Authors of adapters may read its contents, but never modify them."* Adapter authors are explicitly carved out as a privileged consumer.
+
+**Plug.Conn's actual contract:** the struct fields ARE the API. `request_path`, `assigns`, `private`, `resp_body` are documented as part of the request/response model. Adding a Plug.Conn field is a breaking-change consideration.
+
+#### 4.12.2 Decision — which camp does this struct belong to?
+
+| Question | Lean opaque handle | Lean public data structure |
+|---|---|---|
+| Is the struct *derived data* (built from something else: a query, a parsed input, an indexed graph)? | Yes | Less so |
+| Will the underlying representation plausibly change? (different storage, different index, different library) | Yes | No — the shape IS the model |
+| Are the fields useful only via behaviour-style operations (size, member, merge, render)? | Yes | No — callers genuinely need the values (date.year, conn.params) |
+| Would renaming a field break callers in a way that surprises me? | Yes — opaque it now, rename freely later | No — the field name IS the documented contract |
+| Is this the "request/response" or "domain entity" of a context? | Less likely | Yes — Plug.Conn, Ecto.Schema user structs |
+| Is this an "index", "graph", "query", "set", "queue", or other algorithmic data structure? | Yes | No |
+| Will I want to mock or substitute the struct in tests? | Yes — opacity enables `Mox.defmock` on a behaviour over the type | No — public structs are matched directly in tests |
+| Are there 5+ external pattern-match sites on different fields already? | Sign you're already in "public data structure" camp by accident — decide explicitly | Already public; just document |
+
+**Rule of thumb:** if the struct represents "the *result* of doing some work" (a built index, a parsed query, a computed set), it's an opaque handle. If it represents "a *thing in the domain*" (a date, a request, an order), it's a public data structure. Compute → opaque; entity → exposed.
+
+#### 4.12.3 Mechanics — how to actually make a struct opaque
+
+Three layers of enforcement, listed in order of strictness:
+
+```elixir
+defmodule MyApp.Catalog.SearchIndex do
+  @moduledoc """
+  Built search index returned by `MyApp.Catalog.build_index/1`.
+
+  This struct is **opaque** — callers must use the functions in
+  `MyApp.Catalog` (or this module) to operate on it. The internal
+  representation may change without notice between releases.
+  """
+
+  # Layer 1 — Dialyzer-enforced opacity. External callers writing
+  # `%SearchIndex{tree: t}` get a Dialyzer warning. Runtime is unaffected.
+  @opaque t :: %__MODULE__{
+            tree: :gb_trees.tree(),
+            term_count: non_neg_integer(),
+            built_at: DateTime.t()
+          }
+
+  defstruct [:tree, :term_count, :built_at]
+
+  # Layer 2 — accessor functions. Every field outside callers genuinely
+  # need gets a one-liner. These ARE the public API.
+  @spec term_count(t()) :: non_neg_integer()
+  def term_count(%__MODULE__{term_count: n}), do: n
+
+  @spec built_at(t()) :: DateTime.t()
+  def built_at(%__MODULE__{built_at: ts}), do: ts
+
+  # Layer 3 — operations. Most "field access" is actually "do a thing
+  # to the index." Expose those as named operations, not as field reads.
+  @spec lookup(t(), String.t()) :: [Product.t()]
+  def lookup(%__MODULE__{tree: tree}, term), do: # ...
+
+  @spec merge(t(), t()) :: t()
+  def merge(%__MODULE__{} = a, %__MODULE__{} = b), do: # ...
+end
+```
+
+**At the context boundary**, re-export the operations through the context facade so callers don't even need to know `SearchIndex` exists as a module:
+
+```elixir
+defmodule MyApp.Catalog do
+  alias MyApp.Catalog.SearchIndex
+
+  @spec build_index(keyword()) :: SearchIndex.t()
+  def build_index(opts), do: SearchIndex.build(opts)
+
+  defdelegate lookup(index, term), to: SearchIndex
+  defdelegate term_count(index), to: SearchIndex
+  defdelegate built_at(index), to: SearchIndex
+  defdelegate merge(a, b), to: SearchIndex
+end
+```
+
+Now external callers write `Catalog.lookup(idx, "widget")` — they never touch `SearchIndex` as a name, they never see its fields, the entire internal representation can change.
+
+#### 4.12.4 What opaque handles unlock — the architectural payoff
+
+Opaque is not bookkeeping. It's the precondition for four substantive capabilities the boundary cannot offer if its data shape leaks:
+
+1. **Substitutability of representation.** Today it's `%SearchIndex{tree: gb_tree}`. Tomorrow you want to back it with ETS, an external service, a CRDT, a memoized cache — all transparent to callers if and only if they go through accessor functions. With field destructure, every consumer is now part of the migration.
+2. **Mockability via behaviour.** Lift the read API to a `@behaviour` and the opaque handle becomes the adapter's term. `Mox.defmock(MyApp.Catalog.SearchIndexMock, for: MyApp.Catalog.SearchIndex.Behaviour)` is now possible. With exposed fields, every test has to construct a real struct — opacity is the enabler.
+3. **Black-box testability.** Tests assert on observable operations (`Catalog.lookup(idx, "x") == [%Product{}]`) instead of internal shape (`idx.tree == ...`). The implementation can be rewritten without rewriting the tests.
+4. **Honest boundary metrics.** Tools that count "external references to internal modules" (Archdo's leak count, Boundary's checks, Recode's analysis) will correctly report ~0 for an opaque type. With exposed fields, every `%SearchIndex{tree: t} = idx` pattern is a measured leak — and the tool is right to flag it.
+
+#### 4.12.5 Anti-patterns at the data boundary
+
+```elixir
+# BAD — context exposes a struct that's "internal" by convention only
+defmodule MyApp.Catalog do
+  def build_index(opts), do: SearchIndex.build(opts)  # returns %SearchIndex{}
+end
+
+defmodule MyApp.Catalog.SearchIndex do
+  defstruct [:tree, :count, :built_at]                # no @opaque
+  # No accessor functions; callers reach in.
+end
+
+# Caller — destructures the "internal" struct
+defmodule MyAppWeb.SearchController do
+  def index(conn, _params) do
+    %SearchIndex{tree: tree, count: c} = Catalog.build_index([])
+    # Now the controller depends on SearchIndex's exact field layout.
+    # Renaming :tree to :index breaks this controller.
+  end
+end
+```
+
+```elixir
+# GOOD — opaque + accessors via the context facade
+defmodule MyApp.Catalog.SearchIndex do
+  @opaque t :: %__MODULE__{tree: :gb_trees.tree(), count: non_neg_integer(), built_at: DateTime.t()}
+  defstruct [:tree, :count, :built_at]
+  def lookup(%__MODULE__{tree: t}, term), do: # ...
+  def count(%__MODULE__{count: c}), do: c
+end
+
+defmodule MyApp.Catalog do
+  defdelegate lookup(index, term), to: __MODULE__.SearchIndex
+  defdelegate count(index), to: __MODULE__.SearchIndex
+end
+
+defmodule MyAppWeb.SearchController do
+  def index(conn, _params) do
+    idx = Catalog.build_index([])
+    results = Catalog.lookup(idx, conn.params["q"])
+    render(conn, :index, results: results, total: Catalog.count(idx))
+  end
+end
+```
+
+```elixir
+# BAD — choosing "opaque" for a struct that genuinely IS the public model
+defmodule MyApp.Accounts.User do
+  @opaque t :: %__MODULE__{id: integer(), email: String.t(), name: String.t()}
+  defstruct [:id, :email, :name]
+  def email(%__MODULE__{email: e}), do: e
+  def name(%__MODULE__{name: n}), do: n
+  def id(%__MODULE__{id: i}), do: i
+end
+# A user IS the entity. Forcing User.email(user) instead of user.email
+# adds noise without buying substitutability — there's no other "user"
+# representation worth swapping to. This is opacity for opacity's sake.
+
+# GOOD — public data structure with documented field shape
+defmodule MyApp.Accounts.User do
+  @type t :: %__MODULE__{id: pos_integer() | nil, email: String.t(), name: String.t()}
+  defstruct [:id, :email, :name]
+  # Fields are public; callers write user.email freely.
+  # Behaviour functions still go through the context: Accounts.full_name(user).
+end
+```
+
+```elixir
+# BAD — leaking the opaque type in a function spec that returns its internals
+@spec internals(t()) :: %{tree: :gb_trees.tree(), count: non_neg_integer()}
+def internals(%__MODULE__{tree: t, count: c}), do: %{tree: t, count: c}
+# This is a back-door — opacity is broken the moment any function exposes
+# the same fields under a different name.
+
+# GOOD — operations only; no "internals", no "to_map", no field re-exposure
+@spec stats(t()) :: %{term_count: non_neg_integer(), built_at: DateTime.t()}
+def stats(%__MODULE__{count: c, built_at: ts}), do: %{term_count: c, built_at: ts}
+# Returns a derived view, named for what it is, not the struct's shape.
+```
+
+#### 4.12.6 Migration path — retrofitting opacity onto an exposed struct
+
+If you discover (via leak metrics, refactor friction, or mock pain) that an "internal" struct has been treated as public:
+
+1. **Census** — `grep -rn '%SearchIndex{' lib/` to enumerate every external pattern-match. If the count is over ~10 distinct field uses, the migration is real work.
+2. **Add accessor functions** for every field that's actually used externally. Keep them `def`, give them `@spec`s, document them.
+3. **Add operations** for every "I'm reaching into the struct to do X" case. Often those reveal that the same logic is duplicated across callers — fold it into the operation.
+4. **Mark `@opaque`** on the type. Run `mix dialyzer` — every external pattern-match now warns. Each warning is a caller to fix.
+5. **Fix the warnings caller-by-caller.** Replace `%SearchIndex{tree: t} = idx` with `t = SearchIndex.tree(idx)` (if you absolutely must expose tree) or with the operation that uses it (`SearchIndex.lookup(idx, term)`).
+6. **Re-route through the context facade.** Add `defdelegate` re-exports on the context module so callers stop importing the internal module's name at all.
+7. **Field-check the metric.** Whatever boundary tool you use should now report dramatically fewer leaks.
+
+This is one of the highest-leverage refactors for a context whose internals have leaked into too many callers.
+
+#### 4.12.7 When NOT to opaque
+
+- **The struct represents an entity in the domain language** (User, Order, Product, Page). The fields are the model. Opacity adds noise. Use a regular `@type` and document the fields.
+- **The struct is owned by Phoenix/Ecto/another framework** and is part of THEIR contract (Plug.Conn, Ecto.Changeset, Phoenix.Socket). Their opacity decisions trump yours; matching their fields is normal and safe.
+- **Only one consumer exists, in the same context** — opacity buys nothing. Wait for the second consumer.
+- **You're about to add accessors that 1-to-1 mirror the struct's fields** with no business logic — that's pure boilerplate. Ask: are these fields really an implementation detail, or are they the API? If the latter, expose the type (`@type`) and skip the accessors.
+
+#### 4.12.8 Phantom / branded types — encoding state in the type
+
+When a value has multiple lifecycle states — verified vs. unverified, sealed vs. open, draft vs. published — encoding the state IN THE TYPE prevents downstream functions from accidentally accepting the wrong state. This is the **phantom-type** pattern, adapted to Elixir's structural type system: instead of one struct with a `:status` field, you ship TWO structs (or a struct family) where the type itself carries the state.
+
+**The pattern:**
+
+```elixir
+defmodule MyApp.Email do
+  @opaque t :: %__MODULE__{address: String.t()}
+  defstruct [:address]
+
+  @spec new(String.t()) :: {:ok, t()} | {:error, :invalid_format}
+  def new(input) do
+    case validate(input) do
+      :ok -> {:ok, %__MODULE__{address: String.downcase(input)}}
+      {:error, _} = e -> e
+    end
+  end
+
+  def to_string(%__MODULE__{address: a}), do: a
+  defp validate(input), do: # ... regex / RFC 5322 / dnsbl check
+end
+
+defmodule MyApp.UnverifiedEmail do
+  @opaque t :: %__MODULE__{address: String.t(), nonce: String.t()}
+  defstruct [:address, :nonce]
+
+  @spec new(String.t(), String.t()) :: t()
+  def new(address, nonce), do: %__MODULE__{address: address, nonce: nonce}
+end
+
+defmodule MyApp.Accounts.Verifier do
+  alias MyApp.{Email, UnverifiedEmail}
+
+  @spec verify(UnverifiedEmail.t(), submitted_nonce :: String.t()) ::
+          {:ok, Email.t()} | {:error, :nonce_mismatch}
+  def verify(%UnverifiedEmail{nonce: nonce, address: address}, submitted)
+      when nonce == submitted do
+    Email.new(address)
+  end
+
+  def verify(_unverified, _submitted), do: {:error, :nonce_mismatch}
+end
+
+# Downstream consumers take only the validated type:
+defmodule MyApp.Mailer do
+  @spec send(Email.t(), subject :: String.t(), body :: String.t()) :: :ok | {:error, term()}
+  def send(%Email{} = to, subject, body), do: # ...
+  # CAN'T call Mailer.send(unverified, ...) — type mismatch
+end
+```
+
+**What this buys at the architectural level:**
+
+- **One validation point.** `Email.new/1` is the ONLY function that constructs a verified `Email`. Add new constraints there; every consumer inherits them.
+- **Compile-time-ish enforcement.** Elixir's type system isn't compile-checked the way Haskell or Rust is, but Dialyzer + structural pattern matching prevent the most common mistakes. A function head `def send(%Email{} = e, ...)` will not match an `%UnverifiedEmail{}`; the call falls through to no clause and raises.
+- **Contract clarity.** `@spec send(Email.t(), ...)` reads as "this function takes a verified email" without prose.
+
+**Canonical examples for which to plan phantom types:**
+
+| Domain value | Unverified state | Verified state | Transition |
+|---|---|---|---|
+| Email | `%UnverifiedEmail{}` (after registration) | `%Email{}` (after click-confirmation) | `Verifier.verify/2` with token |
+| OAuth access token | `%RawToken{}` (raw bearer) | `%AccessToken{}` (post-introspection) | `Auth.introspect/1` with provider |
+| Document | `%DraftDocument{}` | `%PublishedDocument{}` | `Editor.publish/1` (irreversible) |
+| Payment intent | `%UnconfirmedIntent{}` | `%CapturedPayment{}` | `Payments.capture/1` (settlement) |
+| User registration | `%PendingRegistration{}` | `%User{}` | `Accounts.confirm/1` |
+
+**When NOT to use phantom types:**
+
+- The state is mutable in both directions (account active ⇄ deactivated). A boolean field on one struct is fine; the type doesn't gain you anything.
+- The domain has 5+ states with complex transitions. Use a state machine (`:gen_statem` or `AshStateMachine`) — phantom types don't compose cleanly with multi-step FSMs.
+- The state is purely cosmetic / informational, not a precondition for any operation. Use a regular field.
+
+**Round-trip property — always pair with a serializer:**
+
+```elixir
+property "email round-trip" do
+  check all valid_input <- valid_email_generator() do
+    {:ok, email} = MyApp.Email.new(valid_input)
+    serialized = MyApp.Email.to_string(email)
+    assert {:ok, ^email} = MyApp.Email.new(serialized)
+  end
+end
+```
+
+The round-trip property is the safety net for opacity — if the encoder loses information that the decoder can't recover, the bidirectional pair is broken. Property-test every `to_*`/`from_*` pair you ship.
+
+---
+
+### 4.6 Migration path — retrofitting hexagonal
+
+If you have an existing codebase with direct Stripe calls in your domain, here's the migration:
+
+1. **Add a behaviour** defining the operations the domain actually uses (not everything Stripe does).
+2. **Create the Stripe adapter** that implements the behaviour. Move translation logic here.
+3. **Add config selection** — `Application.compile_env(:my_app, :payment_gateway, MyApp.Billing.PaymentGateway.Stripe)`.
+4. **Replace direct calls** in the domain with calls through the port.
+5. **Add a Mox mock** for tests; switch test config.
+6. **Delete test HTTP mocks** — now tests don't hit Stripe at all.
+
+This is the single highest-leverage refactor for most Elixir codebases.
+
+---
+
+## 5. Layered architecture
+
+**Layered** = dependencies point one direction. Interface → Domain → Infrastructure.
+
+### 5.1 The three layers
+
+```
+┌─────────────────────────────────────┐
+│ Interface (driving adapters)        │ ← Phoenix, CLI, LiveView, GraphQL, Oban worker entry
+├─────────────────────────────────────┤
+│ Domain (contexts, pure logic)       │ ← Accounts, Catalog, Orders, …
+├─────────────────────────────────────┤
+│ Infrastructure (driven adapters)    │ ← Repo, HTTP clients, Mailer, Cache, Ports
+└─────────────────────────────────────┘
+
+Dependencies point downward. Interface → Domain → Infrastructure.
+Never upward. Never sideways (Interface → Infrastructure directly).
+```
+
+### 5.2 Layer responsibilities
+
+**Interface layer:**
+- Translate input (HTTP params, CLI args, GraphQL args, channel payloads)
+- Call the domain (context public API)
+- Format output (render HTML, JSON, LiveView assigns, channel replies)
+- **NO business logic.**
+- **NO direct `Repo` calls.**
+- **NO framework-free modules here** — this layer IS the framework layer.
+
+**Domain layer:**
+- Business rules (validations, calculations, workflows)
+- State transitions (when is an order cancellable? what makes a cart checkoutable?)
+- Orchestration across infrastructure (`with {:ok, user} <- Users.find(…), :ok <- Mailer.send(…)`)
+- **NO framework references.** No `Phoenix.*`, no `Routes.*`, no `Plug.*`.
+- **NO direct HTTP / email / file I/O** — call through behaviours.
+
+**Infrastructure layer:**
+- Adapters (Repo usage, HTTP clients, mailers, cache, hardware)
+- Framework integration (Phoenix endpoints, Phoenix.PubSub, Oban)
+- Cross-cutting concerns (telemetry, logging)
+- **Implements domain behaviours** — does not define them.
+
+### 5.3 Layered + hexagonal + modular monolith = the Elixir default
+
+The three styles combine naturally:
+
+- **Modular monolith** is the unit (one app, one deploy)
+- **Layered** is the inside of the app (interface → domain → infrastructure)
+- **Hexagonal** is how the domain connects to infrastructure (via behaviours)
+
+You get all three by default if you:
+1. Use one Mix app (`modular monolith`)
+2. Keep `lib/my_app/` (domain) and `lib/my_app_web/` (interface) separate (`layered`)
+3. Put external dependencies behind behaviours (`hexagonal`)
+
+This is 98% of Elixir applications. Everything else is an elaboration.
+
+### 5.4 Violations and how to fix them
+
+**Violation 1: Controller doing business logic.**
+
+```elixir
+# BAD — business logic in the interface layer
+def create(conn, %{"order" => params}) do
+  changeset = Order.changeset(%Order{}, params)
+  if total = calculate_total(params["items"]) && total > 1000 do
+    # Discount logic in a controller!
+    discounted = apply_bulk_discount(params)
+    # ...
+  end
+end
+
+# GOOD — interface translates + delegates
+def create(conn, %{"order" => params}) do
+  case MyApp.Orders.place_order(params) do
+    {:ok, order} -> redirect(conn, to: ~p"/orders/#{order.id}")
+    {:error, changeset} -> render(conn, :new, changeset: changeset)
+  end
+end
+```
+
+**Violation 2: Domain importing framework.**
+
+```elixir
+# BAD — domain depends on Phoenix
+defmodule MyApp.Orders do
+  alias MyAppWeb.Router.Helpers, as: Routes    # VIOLATION
+  import Phoenix.Controller                     # VIOLATION
+
+  def complete_order(order) do
+    url = Routes.order_url(MyAppWeb.Endpoint, :show, order)  # URL in domain!
+    Mailer.send_completion_email(order.user.email, url)
+  end
+end
+
+# GOOD — domain returns data; interface builds URLs
+defmodule MyApp.Orders do
+  def complete_order(order) do
+    with {:ok, order} <- mark_completed(order) do
+      MyApp.Mailer.queue_completion_email(order)
+      {:ok, order}
+    end
+  end
+end
+
+# Then — the mailer or the caller builds URLs using Routes
+```
+
+**Violation 3: Interface calling Repo directly.**
+
+```elixir
+# BAD
+def index(conn, _) do
+  products = Repo.all(Product)       # Controller doing Repo — skipping context
+  render(conn, :index, products: products)
+end
+
+# GOOD
+def index(conn, _) do
+  products = MyApp.Catalog.list_products()
+  render(conn, :index, products: products)
+end
+```
+
+**Violation 4: Domain calling HTTP / email / I/O directly.**
+
+```elixir
+# BAD
+defmodule MyApp.Accounts do
+  def register(attrs) do
+    with {:ok, user} <- Repo.insert(User.changeset(%User{}, attrs)) do
+      HTTPoison.post("https://api.mailgun.net/v3/...", {:form, [...]})  # direct HTTP!
+      {:ok, user}
+    end
+  end
+end
+
+# GOOD — domain calls through a behaviour
+defmodule MyApp.Accounts do
+  def register(attrs) do
+    with {:ok, user} <- Repo.insert(User.changeset(%User{}, attrs)),
+         :ok <- MyApp.Mailer.send_welcome(user) do
+      {:ok, user}
+    end
+  end
+end
+```
+
+### 5.5 Test what each layer means
+
+**Interface layer tests** use `Phoenix.ConnTest`, `LiveViewTest`, etc. They hit the actual router and framework.
+
+**Domain layer tests** should use plain `ExUnit.Case` with NO framework imports. If you can't test a context function without starting Phoenix, your layering is wrong.
+
+**Infrastructure tests** are usually Mox-based (behaviours + mocks). The real adapter is integration-tested occasionally.
+
+**The testability test**: can you test a domain function with `use ExUnit.Case` (not `MyAppWeb.ConnCase`)? If not, the domain depends on the interface layer. Find out where and cut it.
+
+---
+
+## 6. Event-driven architecture
+
+Three distinct patterns, often conflated. Distinguish them during design.
+
+### 6.1 Event Notification
+
+**Publisher broadcasts that something happened. Subscribers decide what to do. Event carries minimal data.**
+
+```elixir
+# Publisher — "this happened"
+Phoenix.PubSub.broadcast(MyApp.PubSub, "orders", {:order_completed, order_id})
+
+# Subscriber — fetches what it needs
+def handle_info({:order_completed, order_id}, state) do
+  order = MyApp.Orders.get_order!(order_id)    # Callback to source for data
+  send_confirmation(order)
+  {:noreply, state}
+end
+```
+
+**Trade-offs:**
+- ✅ Simple; publisher fully decoupled from subscribers
+- ✅ Small payloads; no serialization concerns
+- ❌ Subscriber must call back to source for data (coupling to source context)
+- ❌ N subscribers = N callbacks = potential N+1 query amplification
+
+**Use when:** the callback to source is cheap; subscribers are few; data is read-mostly.
+
+### 6.2 Event-Carried State Transfer
+
+**Event carries all the data subscribers need. No callback required.**
+
+```elixir
+event = %{
+  order_id: order.id,
+  customer_email: order.customer.email,
+  items: Enum.map(order.items, &%{name: &1.name, qty: &1.quantity, price: &1.price}),
+  total: order.total,
+  completed_at: DateTime.utc_now()
+}
+Phoenix.PubSub.broadcast(MyApp.PubSub, "orders", {:order_completed, event})
+
+# Subscriber — has everything
+def handle_info({:order_completed, event}, state) do
+  send_confirmation(event.customer_email, event)   # No callback needed
+  {:noreply, state}
+end
+```
+
+**Trade-offs:**
+- ✅ Subscribers fully decoupled from source — no runtime dependency
+- ✅ Scales to many subscribers without N+1
+- ❌ Event payload is larger
+- ❌ Publisher must anticipate what subscribers need
+- ❌ Event schema evolution is harder (subscribers may depend on fields)
+
+**Use when:** subscribers outnumber callbacks; events cross context boundaries; you can't afford callback coupling.
+
+### 6.3 Event Sourcing
+
+**Events ARE the source of truth. Current state is derived by replaying events.**
+
+```
+Standard:  DB row is truth; events are notifications.
+Sourced:   Event log is truth; current state is a projection.
+```
+
+```elixir
+# Commands are intentions
+%PlaceOrder{customer_id: 42, items: [...]}
+
+# Aggregate validates command and emits events
+def execute(%Order{status: :new}, %PlaceOrder{customer_id: id, items: items}) do
+  [%OrderPlaced{order_id: generate_id(), customer_id: id, items: items, placed_at: DateTime.utc_now()}]
+end
+
+# Events are applied to reconstruct state
+def apply(%Order{} = order, %OrderPlaced{order_id: id, items: items}) do
+  %{order | id: id, items: items, status: :placed}
+end
+
+# Projections build read models from events (one per query pattern)
+project(%OrderPlaced{} = event, fn multi ->
+  Ecto.Multi.insert(multi, :listing, %OrderListingEntry{...})
+end)
+```
+
+**Trade-offs:**
+- ✅ Perfect audit trail (events are immutable history)
+- ✅ Replay / debug by replaying events
+- ✅ Multiple read models from one event stream
+- ✅ Time-travel (rebuild state at any point in history)
+- ❌ Significantly more complex than standard Ecto
+- ❌ Schema evolution requires event versioning
+- ❌ Eventual consistency between events and projections
+- ❌ Storage grows indefinitely (unless you snapshot)
+
+**Use when:**
+- Perfect audit trail is a business / regulatory requirement
+- Complex long-lived processes (insurance claims, multi-step workflows, loan origination)
+- Undo / replay capabilities needed
+- Multiple very different read views of the same data
+
+**DON'T use when:** standard CRUD fits. Event sourcing is not "better CRUD" — it's a different paradigm with significant operational overhead. Most apps should not event-source most contexts.
+
+See the `event-sourcing` skill for Commanded implementation details.
+
+### 6.4 Event-driven decision
+
+```
+Do you need async coupling between contexts?
+├── No (synchronous is fine) → Direct function calls (not event-driven)
+├── Fire-and-forget notification, loss OK → Event Notification (§6.1)
+├── Subscribers shouldn't call back to source → Event-Carried State Transfer (§6.2)
+├── Need backpressure between producer and consumer → GenStage / Broadway (see integration-patterns.md)
+├── Events must survive crashes → Oban (see integration-patterns.md)
+└── Events ARE the source of truth → Event Sourcing (§6.3)
+```
+
+### 6.5 Common event-driven mistakes
+
+**Mistake 1: Using Event Notification when data is expensive to fetch.**
+
+Subscriber callback → source becomes an N+1 query amplifier. Switch to Event-Carried State Transfer (larger payloads, but one fetch at publish time instead of N fetches at subscribe time).
+
+**Mistake 2: Assuming events arrive in order across nodes.**
+
+`Phoenix.PubSub` and `:pg` do not guarantee cross-node ordering. If your logic depends on ordering, either stay single-node or use an ordered store (Kafka, EventStore).
+
+**Mistake 3: Using PubSub when you actually need persistence.**
+
+PubSub events are lost if subscribers are down. If your "notification" MUST be delivered, you need Oban or an event store, not PubSub.
+
+**Mistake 4: Event-sourcing everything.**
+
+Event sourcing has real operational cost. Event-source the contexts that need it (Orders, Payments, Compliance-adjacent) and leave Accounts / Catalog / Settings as normal CRUD.
+
+---
+
+## 7. CQRS — Command Query Responsibility Segregation
+
+Three levels of escalating complexity.
+
+### 7.1 Level 1: Light CQRS (default — most apps already do this)
+
+Same context has **query functions** (reads) and **command functions** (writes). Same database.
+
+```elixir
+defmodule MyApp.Catalog do
+  # === Queries (reads) ===
+  def list_products, do: Repo.all(Product)
+  def get_product!(id), do: Repo.get!(Product, id)
+  def search_products(query), do: Product.search(query) |> Repo.all()
+
+  # === Commands (writes) ===
+  def create_product(attrs) do
+    %Product{} |> Product.changeset(attrs) |> Repo.insert()
+  end
+  def update_product(product, attrs) do
+    product |> Product.changeset(attrs) |> Repo.update()
+  end
+  def delete_product(product), do: Repo.delete(product)
+end
+```
+
+**This is CQRS.** Queries return data. Commands return ok/error. Same DB serves both. **Most apps never need more.**
+
+### 7.2 Level 2: Separated Read Path
+
+Extract query modules. Optionally use read replicas.
+
+```elixir
+# Write path: standard context
+defmodule MyApp.Catalog do
+  def create_product(attrs), do: ...
+  def update_product(product, attrs), do: ...
+
+  # Delegate reads to the query module
+  defdelegate top_sellers(limit \\ 10), to: MyApp.Catalog.Queries
+  defdelegate category_analytics(category), to: MyApp.Catalog.Queries
+end
+
+# Read path: specialized query module
+defmodule MyApp.Catalog.Queries do
+  @moduledoc false
+  import Ecto.Query
+
+  def top_sellers(limit) do
+    from(p in Product,
+      join: oi in OrderItem, on: oi.product_id == p.id,
+      group_by: p.id,
+      order_by: [desc: count(oi.id)],
+      limit: ^limit,
+      select: %{product: p, sales_count: count(oi.id)}
+    ) |> Repo.all()
+  end
+end
+```
+
+**Optional read replica for heavy reads:**
+
+```elixir
+# config/runtime.exs
+config :my_app, MyApp.ReadRepo,
+  url: System.fetch_env!("READ_DATABASE_URL"),
+  read_only: true
+
+# Query module uses read replica
+def top_sellers(limit), do: from(...) |> MyApp.ReadRepo.all()
+```
+
+**Use when:**
+- Dashboard/reporting queries are slow and contend with writes
+- Search needs a different data structure (e.g., Elasticsearch indexed separately)
+- Analytics need pre-aggregated data
+- Read traffic is 10× or more the write traffic
+
+### 7.3 Level 3: Full CQRS + Projections (with event sourcing)
+
+Writes go to an event store. Reads come from purpose-built projections (materialized views).
+
+```
+Command → Aggregate → Event Store (append-only)
+                            ↓
+         ┌──────────────────┼──────────────────┐
+         ↓                  ↓                  ↓
+   ProductList        ProductSearch        SalesDashboard
+   (Ecto table)       (Elasticsearch)      (TimescaleDB)
+```
+
+- Each projection is optimized for a specific query pattern
+- Projections are rebuildable from the event log (disaster recovery!)
+- Eventual consistency between the event store and projections
+
+Full implementation: see the `event-sourcing` skill (Commanded library).
+
+**Use when:**
+- Event sourcing is already in use (Level 3 depends on Level 2 of event sourcing)
+- Multiple very different read views of the same data
+- Read/write scaling needs are dramatically different
+- Eventual consistency between read models is acceptable
+
+### 7.4 CQRS decision
+
+| Signal | Level | Approach |
+|---|---|---|
+| Standard web app, moderate traffic | Light (1) | Queries and commands in same context, same DB |
+| Complex reporting alongside CRUD | Separated (2) | Query modules; optional read replica |
+| Dashboard queries contend with writes | Separated (2) | Read replica; pre-aggregated tables |
+| Full audit trail + different read stores | Full (3) | Event sourcing + projections |
+| "Should I use CQRS?" uncertainty | Light (1) | You're probably already doing it |
+
+### 7.5 CQRS anti-patterns
+
+**Anti-pattern 1: Level 2 without measurement.**
+
+Extracting query modules "just in case" adds indirection. Only separate when you can point to a concrete pain (slow dashboard, read/write contention, different store needed).
+
+**Anti-pattern 2: Level 3 without event sourcing.**
+
+Level 3 (projections) assumes the event store is the source of truth. If you're still using a standard DB, you don't have projections — you have caches. Use Level 2 with a proper cache invalidation strategy instead.
+
+**Anti-pattern 3: Different database per context "because CQRS."**
+
+CQRS is about read/write separation within a context, not cross-context data splitting. Different contexts can have different tables, but they should still live in the same database (for transactions, backups, migrations). Only split databases for genuine scaling or compliance reasons.
+
+---
+
+## 8. Microservices — why Elixir rarely needs them
+
+OTP provides fault isolation (supervision), independent scaling (process pools), loose coupling (contexts + PubSub), service discovery (Registry, `:pg`). **The Elixir default is the modular monolith.**
+
+### 8.1 Legitimate reasons to split
+
+| Signal | Why separate service |
+|---|---|
+| **Different language needed** | GPU service in Python/CUDA, web in Elixir |
+| **Regulatory/compliance isolation** | Payment processing must be PCI-isolated |
+| **Wildly different scaling needs** | Video transcoding vs. web API |
+| **Separate teams with separate release cycles** | Org-driven |
+| **Legacy system integration** | Wrap legacy behind an API boundary |
+
+### 8.2 Illegitimate reasons to split
+
+Do NOT split for:
+
+| Claim | Real solution |
+|---|---|
+| "It's getting big" | Add contexts |
+| "We want loose coupling" | Use behaviours and PubSub |
+| "We want fault isolation" | Use supervision trees |
+| "We want independent scaling" | Process pools, `Task.async_stream`, Broadway |
+| "Microservices are modern" | Elixir is already ahead of this trend |
+
+### 8.3 If you must split
+
+Do it right:
+
+- **Communicate via well-defined APIs** (HTTP/gRPC) — not shared databases
+- **Each service owns its data** (separate databases)
+- **Async integration via message broker** (Kafka, RabbitMQ) — Broadway consumes
+- **For Elixir-to-Elixir within a trusted network**: `:erpc` is an option
+- **Distributed tracing** is mandatory across service boundaries
+- **Backward-compatible API evolution** — once you split, you can't refactor across boundaries
+
+**The cost of a split is permanent.** Merging back is ~10× harder than splitting forward.
+
+---
+
+## 9. Styles combine per context
+
+Different contexts in the same application can use different styles.
+
+```
+Typical large Elixir app (modular monolith):
+
+┌──────────────────────────────────────────────────┐
+│  Accounts context          Orders context         │
+│  ├─ Light CQRS             ├─ Event sourcing      │
+│  ├─ Direct Ecto            │  (Commanded)         │
+│  └─ Request-response       ├─ Full CQRS           │
+│                            │  (projections)       │
+│  Catalog context           ├─ Event-driven        │
+│  ├─ Separated read path    │  (process managers)  │
+│  │  (search index)         └─ Sagas for workflows │
+│  └─ Event-carried state                           │
+│     transfer (PubSub)      Notifications context  │
+│                            ├─ Event notification  │
+│                            │  (subscribes PubSub) │
+│                            └─ Oban for delivery   │
+│                                                    │
+│  ─── All in one Mix release, one supervision ──   │
+│  ─── tree, one deployment                    ──   │
+└──────────────────────────────────────────────────┘
+```
+
+**The boundary module (context) is what enables this — callers don't know or care what style is used internally.** Start simple; evolve individual contexts into richer patterns as their domains demand.
+
+**Migration path for individual contexts:**
+
+1. Start every context as plain Ecto CRUD (Light CQRS)
+2. When a specific context needs separated reads, move it to Separated Read Path
+3. When a specific context needs audit/replay, move it to Event Sourcing
+4. When a specific context needs multiple read stores, move it to Full CQRS
+
+Each migration affects only the affected context. Callers don't change.
+
+---
+
+## 10. Cross-references
+
+### Within this skill
+
+- `SKILL.md §4` — architectural principles (the eleven)
+- `SKILL.md §12` — architectural styles overview + decision tree
+- [process-topology.md](process-topology.md) — how styles map to supervision trees
+- [integration-patterns.md](integration-patterns.md) — inter-context mechanisms (GenStage, Oban, event sourcing) used by event-driven and CQRS styles
+- [data-ownership.md](data-ownership.md) — aggregate design, multi-tenancy across styles
+- [otp-design.md](otp-design.md) — OTP choices per style
+- [test-strategy.md](test-strategy.md) — testing architecture per style (hexagonal testability)
+- [growing-evolution.md](growing-evolution.md) — evolving styles as the app grows
+
+### In other skills
+
+- [../implementing/SKILL.md](../implementing/SKILL.md) §10 — implementing contexts and boundaries (code templates)
+- [../reviewing/SKILL.md](../reviewing/SKILL.md) §7.1 — architectural review checklist
+- `../elixir/architecture-reference.md` — the general reference; this subskill is planning-phase framing of the same material
+
+---
+
+**End of architecture-patterns.md.** This subskill is for planning-mode deep walkthroughs. For the decision tables, see `SKILL.md`. For code-level templates, see [../implementing/SKILL.md](../implementing/SKILL.md).

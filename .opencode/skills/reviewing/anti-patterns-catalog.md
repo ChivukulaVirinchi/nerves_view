@@ -1,0 +1,1481 @@
+# Anti-Patterns Catalog
+
+Consolidated catalog of Elixir anti-patterns for use during review. Organized by category — scan the section that matches the code under review.
+
+**Layout:** each entry has a **pattern name**, **why it's bad**, and **the fix**. Severity (block/request-change/suggest) applies contextually — see `./SKILL.md` §6.
+
+**Related:** `./performance-catalog.md` covers performance-specific pitfalls in depth (symptom → root cause → fix → evidence). This catalog covers structural, idiom, process, design, testing, and security anti-patterns.
+
+---
+
+## A. Code-Level Anti-Patterns
+
+### A1. `if` for structural dispatch
+
+**Why it's bad:** `if` with `is_struct`/`is_map_key`/`is_*` guards hides what's really type dispatch. Multi-clause function heads express intent directly and let the compiler optimize.
+
+```elixir
+# BAD
+def handle(event) do
+  if is_struct(event, Click), do: handle_click(event), else: handle_other(event)
+end
+
+# GOOD
+def handle(%Click{} = e), do: handle_click(e)
+def handle(e), do: handle_other(e)
+```
+
+### A2. `try/rescue` for expected failures
+
+**Why it's bad:** `rescue` is for truly exceptional cases. Expected failures (missing keys, parse errors, validation) should return `{:ok, _}` / `{:error, _}` tuples.
+
+```elixir
+# BAD
+try do
+  String.to_integer(user_input)
+rescue
+  ArgumentError -> {:error, :invalid}
+end
+
+# GOOD
+case Integer.parse(user_input) do
+  {n, ""} -> {:ok, n}
+  _ -> {:error, :invalid}
+end
+```
+
+### A3. Single-step pipeline
+
+**Why it's bad:** Pipelines are for sequences. A single step adds noise.
+
+```elixir
+# BAD
+name |> String.upcase()
+
+# GOOD
+String.upcase(name)
+```
+
+### A4. Single-step pipeline into `case`
+
+**Why it's bad:** Same as A3 plus pipe-to-case overhead.
+
+```elixir
+# BAD
+result |> case do
+  :ok -> ...
+  _ -> ...
+end
+
+# GOOD
+case result do
+  :ok -> ...
+  _ -> ...
+end
+```
+
+### A5. Nested `case` where `with` fits
+
+**Why it's bad:** Nested cases have O(n²) visual complexity. `with` linearizes the ok/error flow.
+
+```elixir
+# BAD — 3 levels deep
+case A.get(id) do
+  {:ok, a} ->
+    case B.get(a.id) do
+      {:ok, b} ->
+        case C.do_thing(b) do
+          {:ok, result} -> {:ok, result}
+          err -> err
+        end
+      err -> err
+    end
+  err -> err
+end
+
+# GOOD
+with {:ok, a} <- A.get(id),
+     {:ok, b} <- B.get(a.id),
+     {:ok, result} <- C.do_thing(b) do
+  {:ok, result}
+end
+```
+
+### A6. Anonymous function wrapping single call
+
+**Why it's bad:** Verbose. Function captures are idiomatic.
+
+```elixir
+# BAD
+Enum.map(users, fn u -> User.name(u) end)
+
+# GOOD
+Enum.map(users, &User.name/1)
+```
+
+### A7. `Enum.each/2` used to accumulate
+
+**Why it's bad:** Rebinding inside `each` doesn't escape the closure.
+
+```elixir
+# BAD
+total = 0
+Enum.each(items, fn i -> total = total + i.price end)
+IO.puts(total)   # Still 0!
+
+# GOOD
+total = Enum.reduce(items, 0, &(&1.price + &2))
+```
+
+### A8. `length(list) > 0` for emptiness
+
+**Why it's bad:** O(n) — traverses the whole list.
+
+```elixir
+# BAD
+if length(items) > 0, do: process(items)
+
+# GOOD
+if items != [], do: process(items)
+
+# OR pattern match
+case items do
+  [] -> :empty
+  _ -> process(items)
+end
+```
+
+### A9. `map[:key] != nil` — can't distinguish missing key from nil value
+
+**Why it's bad:** Ambiguous — `nil` may mean "key absent" OR "value is nil".
+
+```elixir
+# BAD
+if config[:timeout] != nil, do: use_timeout(config[:timeout])
+
+# GOOD
+case Map.fetch(config, :timeout) do
+  {:ok, timeout} -> use_timeout(timeout)
+  :error -> use_default()
+end
+```
+
+### A10. `Map.put` on a struct
+
+**Why it's bad:** Silently accepts typo'd keys. `%{s | k: v}` raises on unknown keys.
+
+```elixir
+# BAD
+Map.put(user, :emali, "x@y.com")   # typo silently added as new map key
+
+# GOOD
+%{user | email: "x@y.com"}         # raises KeyError on typo
+```
+
+### A11. `String.to_atom/1` on untrusted input
+
+**Why it's bad:** Atom table is bounded (~1M default) and never GC'd. DoS vector.
+
+```elixir
+# BAD
+key = String.to_atom(params["key"])
+
+# GOOD
+key = String.to_existing_atom(params["key"])
+
+# BEST — whitelist
+@allowed ~w(active inactive pending)a
+if params["key"] in Enum.map(@allowed, &to_string/1),
+  do: String.to_existing_atom(params["key"]),
+  else: :invalid
+```
+
+### A12. String concatenation in a loop
+
+**Why it's bad:** `<>` in `reduce` is O(n²). Each call allocates a new binary.
+
+```elixir
+# BAD
+Enum.reduce(parts, "", fn p, acc -> acc <> p end)
+
+# GOOD
+IO.iodata_to_binary(parts)
+
+# OR — pass IO list directly to I/O
+IO.write(parts)
+```
+
+### A13. `Map.values |> Enum.filter` — two passes
+
+**Why it's bad:** Materializes intermediate list.
+
+```elixir
+# BAD
+map |> Map.values() |> Enum.filter(& &1.active?)
+
+# GOOD
+for {_, %{active?: true} = v} <- map, do: v
+```
+
+### A14. Identity `case` statement
+
+**Why it's bad:** Does nothing — every clause returns its own input.
+
+```elixir
+# BAD
+mode = case config.mode do
+  :async -> :async
+  :sync -> :sync
+end
+
+# GOOD
+mode = config.mode
+```
+
+### A15. Pipe to anonymous function
+
+**Why it's bad:** Awkward syntax. `then/1` is idiomatic.
+
+```elixir
+# BAD
+data |> (fn x -> x * 2 end).()
+
+# GOOD
+data |> then(&(&1 * 2))
+```
+
+### A16. Hand-aligned multi-line calls
+
+**Why it's bad:** Formatter will destroy the alignment.
+
+```elixir
+# BAD
+result = some_function(arg1,
+                       arg2,
+                       arg3)
+
+# GOOD — let formatter own the layout
+result =
+  some_function(
+    arg1,
+    arg2,
+    arg3
+  )
+```
+
+### A17. Defensive extraction where assertive match is better
+
+**Why it's bad:** Defensive extraction of internal data hides bugs. Assertive match crashes on violation — the bug surfaces immediately.
+
+```elixir
+# BAD — internal data, defensive
+def process(response) do
+  body = Map.get(response, :body, nil)
+  status = Map.get(response, :status, 0)
+  handle(status, body)
+end
+
+# GOOD — internal data, assertive
+def process(%{status: status, body: body}), do: handle(status, body)
+```
+
+(For external/user input, defensive is correct — see A11.)
+
+---
+
+## B. Process & OTP Anti-Patterns
+
+### B1. Blocking `init/1`
+
+**Why it's bad:** Supervisor blocks during `init`. If one child takes 30s, the whole tree waits.
+
+```elixir
+# BAD
+def init(opts) do
+  data = expensive_load()
+  {:ok, %{data: data}}
+end
+
+# GOOD
+def init(opts), do: {:ok, %{data: nil, opts: opts}, {:continue, :load}}
+
+def handle_continue(:load, state) do
+  {:noreply, %{state | data: expensive_load()}}
+end
+```
+
+### B2. Unsupervised `spawn`
+
+**Why it's bad:** Crashes are silent; work disappears.
+
+```elixir
+# BAD
+spawn(fn -> send_email(user) end)
+
+# GOOD
+Task.Supervisor.start_child(MyApp.TaskSup, fn -> send_email(user) end)
+```
+
+### B3. `try/rescue` instead of `catch :exit` for GenServer.call
+
+**Why it's bad:** GenServer.call raises **exits** not exceptions. `rescue` won't catch them.
+
+```elixir
+# BAD — won't catch the exit
+try do
+  GenServer.call(pid, :status)
+rescue
+  _ -> {:error, :down}
+end
+
+# GOOD
+try do
+  GenServer.call(pid, :status)
+catch
+  :exit, _ -> {:error, :down}
+end
+```
+
+### B4. Missing `handle_info/2` catch-all
+
+**Why it's bad:** Stray `:DOWN`, `:EXIT`, or telemetry messages crash the process.
+
+```elixir
+# BAD
+def handle_info({:my_event, data}, state), do: ...
+# (no catch-all)
+
+# GOOD
+def handle_info({:my_event, data}, state), do: ...
+def handle_info(_msg, state), do: {:noreply, state}
+```
+
+### B5. `GenServer.call` with default timeout in hot path
+
+**Why it's bad:** 5s tail latency spikes when the callee is busy.
+
+```elixir
+# BAD
+def get_config, do: GenServer.call(MyConfig, :get)
+
+# GOOD
+def get_config do
+  try do
+    GenServer.call(MyConfig, :get, 100)
+  catch
+    :exit, {:timeout, _} -> @default_config
+  end
+end
+```
+
+### B6. GenServer as a read-heavy registry
+
+**Why it's bad:** Single process serializes all reads — bottleneck.
+
+```elixir
+# BAD
+defmodule Cache do
+  use GenServer
+  def get(k), do: GenServer.call(__MODULE__, {:get, k})
+  def handle_call({:get, k}, _, state), do: {:reply, Map.get(state, k), state}
+end
+
+# GOOD — ETS bypasses the mailbox
+:ets.new(:my_cache, [:set, :named_table, :public, read_concurrency: true])
+
+def get(k) do
+  case :ets.lookup(:my_cache, k) do
+    [{^k, v}] -> {:ok, v}
+    [] -> :error
+  end
+end
+```
+
+### B7. `Process.sleep` in a GenServer callback
+
+**Why it's bad:** Blocks all pending messages for the sleep duration.
+
+```elixir
+# BAD
+def handle_info(:tick, state) do
+  Process.sleep(10_000)
+  work()
+  send(self(), :tick)
+  {:noreply, state}
+end
+
+# GOOD
+def handle_info(:tick, state) do
+  work()
+  Process.send_after(self(), :tick, 10_000)
+  {:noreply, state}
+end
+```
+
+### B8. `Agent` holding complex business logic
+
+**Why it's bad:** Business rules buried in Agent closures are untestable and invisible.
+
+```elixir
+# BAD
+Agent.update(Cart, fn cart ->
+  if Enum.count(cart.items) >= 50, do: cart, else: %{cart | items: [item | cart.items]}
+end)
+
+# GOOD — GenServer with State module holding pure logic
+defmodule Cart do
+  use GenServer
+  defmodule State do
+    def add_item(%{items: items} = s, _item) when length(items) >= 50, do: s
+    def add_item(%{items: items} = s, item), do: %{s | items: [item | items]}
+  end
+  # ... delegate in callbacks
+end
+```
+
+### B9. Named `start_link` that can't be instanced
+
+**Why it's bad:** `name: __MODULE__` hardcoded blocks tests and multi-instance.
+
+```elixir
+# BAD
+def start_link(_), do: GenServer.start_link(__MODULE__, [], name: __MODULE__)
+
+# GOOD
+def start_link(opts) do
+  name = Keyword.get(opts, :name, __MODULE__)
+  GenServer.start_link(__MODULE__, opts, name: name)
+end
+```
+
+### B10. `active: true` on a TCP listener
+
+**Why it's bad:** BEAM delivers every packet as a message — mailbox overflow.
+
+```elixir
+# BAD
+:gen_tcp.listen(port, [:binary, active: true])
+
+# GOOD
+:gen_tcp.listen(port, [:binary, active: :once, packet: 4])
+```
+
+### B11. Handling client in the acceptor process
+
+**Why it's bad:** Next `accept/1` is starved while you serve the current client.
+
+```elixir
+# BAD
+def accept_loop(sock) do
+  {:ok, client} = :gen_tcp.accept(sock)
+  handle_client(client)
+  accept_loop(sock)
+end
+
+# GOOD — spawn per connection
+def accept_loop(sock) do
+  {:ok, client} = :gen_tcp.accept(sock)
+  {:ok, pid} = Task.Supervisor.start_child(Sup, fn -> handle_client(client) end)
+  :gen_tcp.controlling_process(client, pid)
+  accept_loop(sock)
+end
+```
+
+### B12. `terminate/2` assumed to run on crash
+
+**Why it's bad:** `terminate/2` is only called on `{:stop, _, _}` and normal shutdown, **not** on link-propagated exits. Use `trap_exit` if you need cleanup.
+
+```elixir
+# BAD — cleanup won't run on sibling crash
+def terminate(_, %{file: file}), do: File.close(file)
+
+# GOOD
+def init(_) do
+  Process.flag(:trap_exit, true)
+  # ... now terminate/2 is called on supervisor shutdown
+end
+```
+
+---
+
+## C. Ecto / Data Anti-Patterns
+
+### C1. N+1 preloads
+
+**Why it's bad:** One query per parent.
+
+```elixir
+# BAD
+users = Repo.all(User)
+Enum.map(users, fn u -> Repo.preload(u, :organization) end)
+
+# GOOD
+users = User |> Repo.all() |> Repo.preload(:organization)
+# OR
+users = from(u in User, preload: :organization) |> Repo.all()
+```
+
+### C2. `Repo.all |> length` for count
+
+**Why it's bad:** Loads all rows into memory to count them.
+
+```elixir
+# BAD
+count = Repo.all(from(u in User, where: u.active?)) |> length()
+
+# GOOD
+count = Repo.aggregate(from(u in User, where: u.active?), :count, :id)
+```
+
+### C3. Calling `Repo` directly from controller/LiveView
+
+**Why it's bad:** Breaks context abstraction; couples HTTP layer to persistence.
+
+```elixir
+# BAD
+def show(conn, %{"id" => id}) do
+  user = Repo.get!(User, id)
+  render(conn, :show, user: user)
+end
+
+# GOOD
+def show(conn, %{"id" => id}) do
+  user = Accounts.get_user!(id)
+  render(conn, :show, user: user)
+end
+```
+
+### C4. `cast/3` with user-controlled keys
+
+**Why it's bad:** User can set arbitrary fields, including `role: :admin`.
+
+```elixir
+# BAD
+def changeset(user, attrs), do: cast(user, attrs, Map.keys(attrs))
+
+# GOOD
+@castable ~w(email name password)a    # whitelist at compile time
+def changeset(user, attrs), do: cast(user, attrs, @castable)
+```
+
+### C5. Validating uniqueness without DB constraint
+
+**Why it's bad:** Race condition — two parallel inserts can both pass.
+
+```elixir
+# BAD — racy
+def changeset(user, attrs) do
+  user |> cast(attrs, @castable) |> validate_unique_in_code()
+end
+
+# GOOD
+def changeset(user, attrs) do
+  user
+  |> cast(attrs, @castable)
+  |> unique_constraint(:email)   # DB enforces + changeset translates DB error
+end
+# Must pair with: create unique_index(:users, [:email]) in a migration
+```
+
+### C6. Returning a query from a context
+
+**Why it's bad:** Leaks Ecto.Query to callers; context abstraction broken.
+
+```elixir
+# BAD
+def list_active_users, do: from(u in User, where: u.active?)
+
+# GOOD
+def list_active_users, do: from(u in User, where: u.active?) |> Repo.all()
+```
+
+### C7. Multiple `Repo` calls where `Multi` is needed
+
+**Why it's bad:** Partial success on crash.
+
+```elixir
+# BAD
+{:ok, user} = Repo.insert(user_cs)
+{:ok, _} = Repo.insert(profile_cs(user))   # What if this fails?
+
+# GOOD
+Multi.new()
+|> Multi.insert(:user, user_cs)
+|> Multi.insert(:profile, fn %{user: u} -> profile_cs(u) end)
+|> Repo.transaction()
+```
+
+### C8. Destructive migration in one step
+
+**Why it's bad:** Between migration run and code deploy, code is broken.
+
+```elixir
+# BAD — drop + add in one migration
+def change do
+  alter table(:users) do
+    remove :old_field
+    add :new_field, :string
+  end
+end
+
+# GOOD — three phases across deploys:
+# 1. Add :new_field
+# 2. Dual-write in code; read from :new_field
+# 3. Backfill :new_field from :old_field
+# 4. Separate migration: remove :old_field
+```
+
+### C9. Long work inside `Repo.transaction`
+
+**Why it's bad:** Holds DB connection → pool exhaustion under load.
+
+```elixir
+# BAD
+Repo.transaction(fn ->
+  user = Repo.insert!(cs)
+  send_welcome_email(user)   # Network I/O under lock
+  log_to_s3(user)
+end)
+
+# GOOD
+{:ok, user} = Repo.insert(cs)
+Task.Supervisor.start_child(Sup, fn -> send_welcome_email(user) end)
+Task.Supervisor.start_child(Sup, fn -> log_to_s3(user) end)
+```
+
+### C10. Query without tenant/user scope
+
+**Why it's bad:** IDOR — any user can access any record by ID.
+
+```elixir
+# BAD
+def show(conn, %{"id" => id}) do
+  post = Repo.get!(Post, id)   # ANY post, not just current user's
+  render(conn, :show, post: post)
+end
+
+# GOOD — scope at context
+def get_user_post!(user, id) do
+  Post |> where(user_id: ^user.id) |> Repo.get!(id)
+end
+```
+
+---
+
+## D. Architecture & Design Anti-Patterns
+
+### D1. Side effects mixed into domain logic
+
+**Why it's bad:** Domain becomes untestable; hard to reason about.
+
+```elixir
+# BAD
+defmodule Orders do
+  def place(params) do
+    order = calculate(params)
+    Mailer.send_confirmation(order)     # Side effect in business logic
+    SMSNotifier.send(order.user)        # Another side effect
+    Analytics.track(order)               # Another
+    {:ok, order}
+  end
+end
+
+# GOOD — domain is pure; side effects are event-driven
+defmodule Orders do
+  def place(params) do
+    order = calculate(params)
+    Phoenix.PubSub.broadcast(MyApp.PubSub, "orders", {:placed, order})
+    {:ok, order}
+  end
+end
+
+# Side effect handlers are separately supervised
+defmodule Notifications.Worker do
+  def handle_info({:placed, order}, state) do
+    Mailer.send_confirmation(order)
+    {:noreply, state}
+  end
+end
+```
+
+### D2. Modules that skip the context layer
+
+**Why it's bad:** Coupling from controller/job/worker directly to schema/query bypasses the domain boundary.
+
+```elixir
+# BAD
+defmodule MyAppWeb.UserController do
+  def show(conn, %{"id" => id}) do
+    user = Repo.get!(MyApp.Accounts.User, id)
+    # ...
+  end
+end
+
+# GOOD
+defmodule MyAppWeb.UserController do
+  def show(conn, %{"id" => id}) do
+    user = MyApp.Accounts.get_user!(id)
+    # ...
+  end
+end
+```
+
+### D3. Shared state between contexts via global
+
+**Why it's bad:** Hidden coupling; can't split into services later.
+
+```elixir
+# BAD — two contexts reading/writing the same :persistent_term
+defmodule Accounts, do: :persistent_term.put({:shared, :session}, data)
+defmodule Billing, do: :persistent_term.get({:shared, :session})
+# Now Billing can't move without knowing about Accounts internals
+```
+
+```elixir
+# GOOD — explicit API between contexts
+defmodule Accounts do
+  def current_session(user_id), do: ...   # public
+end
+
+defmodule Billing do
+  def charge(user_id) do
+    {:ok, session} = Accounts.current_session(user_id)
+    # ...
+  end
+end
+```
+
+### D4. Protocol + behaviour confusion
+
+**Why it's bad:** Protocols dispatch on data type; behaviours dispatch on module. Using protocols for strategy pattern (where module is the strategy) creates confusing code.
+
+```elixir
+# BAD — protocol where behaviour is the natural fit
+defprotocol StorageBackend do
+  def put(backend, key, value)
+  def get(backend, key)
+end
+# The "backend" is effectively a module — but Protocol dispatches on struct type
+
+# GOOD — behaviour for strategy
+defmodule StorageBackend do
+  @callback put(key :: String.t(), value :: term()) :: :ok | {:error, term()}
+  @callback get(key :: String.t()) :: {:ok, term()} | :error
+end
+
+defmodule RedisBackend do
+  @behaviour StorageBackend
+  # ...
+end
+```
+
+### D5. Leaky abstraction (context exposes schema)
+
+**Why it's bad:** Callers depend on schema fields; changes to DB schema ripple through UI.
+
+```elixir
+# BAD
+def get_user(id), do: Repo.get(User, id)
+# Caller does: user.hashed_password, user.internal_notes, ...
+
+# GOOD — context returns public-safe view, or at least filters sensitive fields
+def get_user(id) do
+  case Repo.get(User, id) do
+    nil -> {:error, :not_found}
+    user -> {:ok, %{id: user.id, email: user.email, name: user.name}}
+  end
+end
+```
+
+### D6. Over-supervision of ephemeral work
+
+**Why it's bad:** Creating a permanent supervisor for a one-shot parallel map is waste.
+
+```elixir
+# BAD — DynamicSupervisor just to run 100 tasks once
+{:ok, _} = DynamicSupervisor.start_link(strategy: :one_for_one, name: Sup)
+Enum.each(urls, fn url ->
+  DynamicSupervisor.start_child(Sup, {Task, fn -> fetch(url) end})
+end)
+
+# GOOD — Task.async_stream
+urls
+|> Task.async_stream(&fetch/1, max_concurrency: 10, timeout: 30_000)
+|> Enum.to_list()
+```
+
+### D7. Under-supervision of long-running work
+
+**Why it's bad:** `spawn_link` for work that outlives the caller; no restart strategy.
+
+```elixir
+# BAD
+spawn_link(fn -> cron_loop() end)
+
+# GOOD
+children = [MyApp.CronWorker]
+Supervisor.start_link(children, strategy: :one_for_one)
+```
+
+### D8. `Application.get_env` in hot paths
+
+**Why it's bad:** Each call goes through the application controller — unnecessary overhead.
+
+```elixir
+# BAD
+def handle_request(conn) do
+  timeout = Application.get_env(:my_app, :timeout)   # on every request
+  # ...
+end
+
+# GOOD — cache as module attribute (compile-time) or :persistent_term (runtime-changeable)
+@timeout Application.compile_env(:my_app, :timeout, 5_000)
+
+# OR for runtime:
+:persistent_term.put({MyApp, :timeout}, Application.get_env(:my_app, :timeout))
+def handle_request(_), do: :persistent_term.get({MyApp, :timeout})
+```
+
+---
+### D9. Behaviour callback overloaded with reflection atom
+
+**Why it's bad:** Dispatch callbacks that accept a meta-atom like `:list_instructions`, `:describe`, or `:capabilities` couple reflection to data validation. Callers pass dummy data just to ask "what can you do?"; tests need "valid pairs" maps to exercise the reflection path; validation order becomes tricky.
+
+```elixir
+# BAD — dispatch + reflection on the same callback
+@callback execute(instruction :: atom(), a :: term(), b :: term()) ::
+            {:ok, {:result, term()}} | {:ok, {:instructions, [atom()]}}
+
+Mod.execute(:list_instructions, 0, 0)   # 0, 0 are dummies
+```
+
+```elixir
+# GOOD — reflection is its own callback
+@callback execute(instruction(), a(), b()) :: {:ok, output()}
+@callback instructions() :: [instruction(), ...]
+
+Mod.instructions()                      # reflection — pure, no args
+Mod.execute(:add, 2, 3)                 # dispatch — all args meaningful
+```
+
+See planning §4.9 Behaviour design.
+
+### D10. Compound error reasons squashing distinct failures
+
+**Why it's bad:** A single reason like `{:out_of_range_or_wrong_type, value}` merges two distinct failure modes. Consumers can't programmatically respond to just "out of range" vs "wrong type".
+
+```elixir
+# BAD — two failure modes, one reason
+defp validate(v) when is_integer(v) and v in 0..100, do: {:ok, v}
+defp validate(v), do: {:error, {:out_of_range_or_wrong_type, v}}
+```
+
+```elixir
+# GOOD — split, include the expected range on out-of-range
+defp validate(v) when is_integer(v) and v in 0..100, do: {:ok, v}
+defp validate(v) when is_integer(v), do: {:error, {:out_of_range, v, 0..100}}
+defp validate(v), do: {:error, {:wrong_type, v}}
+```
+
+### D11. Mixed error-signalling styles at the same boundary
+
+**Why it's bad:** When a public module uses `{:error, _}` tuples for some failures and raises for others, callers can't write uniform error handling.
+
+```elixir
+# BAD — facade mixes styles
+defmodule MyApp.Foo do
+  def describe(module) when module in @known, do: %{...}   # raises on unknown
+  def execute(module, ...) do
+    if module in @known, do: ..., else: {:error, :unknown_module}
+  end
+end
+```
+
+```elixir
+# GOOD — stdlib convention: safe name returns ok/error, ! variant raises
+defmodule MyApp.Foo do
+  def describe(module) do
+    if module in @known, do: {:ok, %{...}}, else: {:error, :unknown_module}
+  end
+
+  def describe!(module) do
+    case describe(module) do
+      {:ok, d} -> d
+      {:error, r} -> raise ArgumentError, "unknown: #{inspect(r)}"
+    end
+  end
+end
+```
+
+### D12. Validation order blocks legitimately-data-free operations
+
+**Why it's bad:** When a callback dispatches on a key + data, validating data BEFORE the key means reflection/meta operations are forced to accept dummy inputs.
+
+```elixir
+# BAD — :list_instructions requires valid a/b even though it ignores them
+def execute(instruction, a, b) do
+  with {:ok, a} <- validate_a(a),
+       {:ok, b} <- validate_b(b),
+       {:ok, i} <- validate_instruction(instruction) do
+    dispatch(i, a, b)
+  end
+end
+```
+
+```elixir
+# GOOD — gate by dispatch key first; reflection bypasses data validation
+def execute(instruction, a, b) do
+  with {:ok, i} <- validate_instruction(instruction),
+       {:ok, a} <- validate_a(a),
+       {:ok, b} <- validate_b(b) do
+    dispatch(i, a, b)
+  end
+end
+```
+
+Better still: promote reflection to its own function (see D9 above).
+
+### D13. Cross-module moduledoc disagreement
+
+**Why it's bad:** A reader lands on one module, trusts the moduledoc, and writes code against a contract the *other* module contradicts. It's the distributed form of "docs don't match code" — and harder to spot because each individual moduledoc looks internally consistent. Common triggers: binding/listening details (IPv4 vs IPv6), request-pipeline order, or "this is defence in depth" framing where the base-line assumption drifts between modules.
+
+```elixir
+# BAD — two modules disagree about what the endpoint binds to
+
+defmodule MyApp do
+  @moduledoc """
+  Binds to IPv4 loopback (`127.0.0.1`) only.
+  """
+end
+
+defmodule MyApp.Plugs.RequireLoopback do
+  @moduledoc """
+  Defence in depth — the endpoint already binds to `127.0.0.1` + `::1`.
+  """
+end
+```
+
+```elixir
+# GOOD — both moduledocs agree; one cites the other as source of truth
+
+defmodule MyApp do
+  @moduledoc """
+  Binds to IPv4 loopback (`127.0.0.1`) only. See `MyApp.Application`.
+  """
+end
+
+defmodule MyApp.Plugs.RequireLoopback do
+  @moduledoc """
+  Defence in depth — the endpoint (see `MyApp.Application`) binds to IPv4 loopback
+  only; this plug also accepts IPv6 loopback so the pipeline stays correct if
+  that binding is ever broadened.
+  """
+end
+```
+
+**How to catch it:** when you change subsystem behaviour (ports, protocols, bindings, contracts, callback arities), grep for every moduledoc that mentions the changed subsystem — treat the moduledoc updates as part of the same atomic change.
+
+### D14. `Plug.Router` route calling a plug module's `call/2` with raw opts
+
+**Why it's bad:** `plug(MyPlug)` runs `MyPlug.init([])` at compile time and caches the result — that's how Plug normalization works. Calling `MyPlug.call(conn, [])` directly from a route block bypasses `init/1` entirely. Today it's "fine" because `init/1` is a no-op; the moment someone adds option validation or shape normalization to `init/1`, the route silently stops seeing normalized opts and starts violating the module's assumptions.
+
+```elixir
+# BAD — bypasses Handlers.Home.init/1
+get "/" do
+  Handlers.Home.call(conn, [])
+end
+```
+
+```elixir
+# GOOD — pre-initialize at compile time, mirroring how `plug()` would
+@home_opts Handlers.Home.init([])
+
+get("/", do: Handlers.Home.call(conn, @home_opts))
+```
+
+Alternative: if you don't need per-route paths, just `plug(Handlers.Home)` in the pipeline and let the router drive it.
+
+### D15. `runtime.exs` parses env vars with raw converters
+
+**Why it's bad:** `String.to_integer/1` raises `ArgumentError` on malformed input with no context about *which* env var failed or what was actually read. Ops sees a stacktrace at boot, not a message. The failure is fatal but unattributable.
+
+```elixir
+# BAD — typo in LOCAL_WEBVIEW_PORT gives a raw ArgumentError stacktrace
+port = System.get_env("LOCAL_WEBVIEW_PORT", "4040") |> String.to_integer()
+config :local_webview, port: port
+```
+
+```elixir
+# GOOD — explicit validation with a legible boot-time message
+raw = System.get_env("LOCAL_WEBVIEW_PORT", "4040")
+
+port =
+  case Integer.parse(raw) do
+    {port, ""} when port in 0..65_535 ->
+      port
+
+    _ ->
+      raise """
+      LOCAL_WEBVIEW_PORT must be an integer in 0..65535, got: #{inspect(raw)}.
+      Set the environment variable to a valid port number before starting the release.
+      """
+  end
+
+config :local_webview, port: port
+```
+
+The pattern extends to `String.to_atom/1`, `Date.from_iso8601!/1`, boolean coercions, etc. At every boundary where untrusted input enters at boot, prefer explicit validation over raw converters — the error message is what ops will see at 3am.
+
+---
+
+
+## E. Testing Anti-Patterns
+
+### E1. `Process.sleep` waiting for async work
+
+**Why it's bad:** Flaky on slow CI; slow on fast CI.
+
+```elixir
+# BAD
+MyApp.Worker.trigger(pid)
+Process.sleep(500)
+assert MyApp.State.get() == :done
+
+# GOOD — message-driven
+:telemetry.attach("t", [:worker, :done], fn _, _, _, _ -> send(self(), :done) end, nil)
+MyApp.Worker.trigger(pid)
+assert_receive :done, 1_000
+```
+
+### E2. Hand-crafted schema structs
+
+**Why it's bad:** Duplicates changeset logic. When validation changes, tests don't.
+
+```elixir
+# BAD
+{:ok, user} = Repo.insert(%User{email: "x", hashed_password: "fake"})
+
+# GOOD
+user = AccountsFixtures.user_fixture()
+# Uses Accounts.register_user/1 → real changeset path
+```
+
+### E3. Mocking what you own
+
+**Why it's bad:** Mock replaces the code under test; you're testing the mock, not reality.
+
+```elixir
+# BAD — mocks your own repo module
+expect(MyApp.UserRepoMock, :get, fn _ -> %User{} end)
+Accounts.register_user(attrs)
+
+# GOOD — use real Repo via sandbox; mock only external boundaries
+MyApp.EmailSender.Mock |> expect(:send, fn _, _, _ -> {:ok, :sent} end)
+Accounts.register_user(attrs)
+```
+
+### E4. `async: false` without stated global
+
+**Why it's bad:** Slows the suite. `async: false` should cite its reason.
+
+```elixir
+# BAD
+defmodule MyTest do
+  use ExUnit.Case, async: false   # why?
+  test "pure function", do: assert MyMath.add(1, 2) == 3
+end
+
+# GOOD
+defmodule MyTest do
+  use ExUnit.Case, async: true
+  test "pure function", do: assert MyMath.add(1, 2) == 3
+end
+```
+
+### E5. Testing implementation, not behaviour
+
+**Why it's bad:** Coupled to internals; breaks on refactor even when behaviour is intact.
+
+```elixir
+# BAD
+test "add_item calls Logger.info" do
+  assert_called Logger.info(:_) do
+    Cart.add_item(cart, item)
+  end
+end
+
+# GOOD
+test "add_item returns updated cart with the item" do
+  new_cart = Cart.add_item(cart, item)
+  assert item in new_cart.items
+end
+```
+
+### E6. Orphaned processes between tests
+
+**Why it's bad:** Next test sees stale state.
+
+```elixir
+# BAD
+test "worker starts" do
+  {:ok, _pid} = MyApp.Worker.start_link([])
+  # pid leaks beyond the test
+end
+
+# GOOD
+test "worker starts" do
+  _pid = start_supervised!(MyApp.Worker)
+  # ExUnit auto-shuts down after test
+end
+```
+
+---
+
+## F. Security Anti-Patterns
+
+### F1. SQL injection via `fragment`
+
+**Why it's bad:** Direct string interpolation into SQL.
+
+```elixir
+# BAD
+from(u in User, where: fragment("name = '#{q}'"))
+
+# GOOD
+from(u in User, where: fragment("name = ?", ^q))
+# OR stay in Ecto DSL
+from(u in User, where: u.name == ^q)
+```
+
+### F2. `binary_to_term` without `:safe`
+
+**Why it's bad:** Untrusted binary can allocate unbounded atoms and refs.
+
+```elixir
+# BAD
+:erlang.binary_to_term(network_input)
+
+# GOOD
+:erlang.binary_to_term(network_input, [:safe])
+```
+
+### F3. `==` for token comparison (timing attack)
+
+**Why it's bad:** String equality is not constant-time.
+
+```elixir
+# BAD
+if stored_token == provided_token, do: :ok
+
+# GOOD
+if Plug.Crypto.secure_compare(stored_token, provided_token), do: :ok
+```
+
+### F4. Logging unredacted secrets
+
+**Why it's bad:** Secrets leak to logs/monitoring.
+
+```elixir
+# BAD
+Logger.info("User: #{inspect(user)}")   # includes hashed_password, tokens
+
+# GOOD — schema field with redact: true + filter_parameters config
+schema "users" do
+  field :hashed_password, :string, redact: true
+  field :api_key, :string, redact: true
+end
+```
+
+### F5. Open redirect from user param
+
+**Why it's bad:** Phishing vector — attacker sends login link that redirects to their site.
+
+```elixir
+# BAD
+def after_login(conn, %{"return_to" => url}) do
+  redirect(conn, external: url)
+end
+
+# GOOD — validate internal only
+def after_login(conn, %{"return_to" => url}) do
+  if internal?(url), do: redirect(conn, to: url), else: redirect(conn, to: ~p"/home")
+end
+
+defp internal?(url), do: String.starts_with?(url, "/") and not String.starts_with?(url, "//")
+```
+
+### F6. Missing TLS peer verification
+
+**Why it's bad:** MITM vulnerability.
+
+```elixir
+# BAD
+:ssl.connect(host, 443, [verify: :verify_none])
+
+# GOOD
+:ssl.connect(host, 443, [
+  verify: :verify_peer,
+  cacerts: :public_key.cacerts_get(),
+  server_name_indication: to_charlist(host),
+  customize_hostname_check: [match_fun: :public_key.pkix_verify_hostname_match_fun(:https)]
+])
+```
+
+(Full security catalog: `./security-audit-deep.md`.)
+
+---
+
+## G. Configuration Anti-Patterns
+
+### G1. `System.get_env` in `config/config.exs`
+
+**Why it's bad:** Compile-time env read; doesn't change at runtime.
+
+```elixir
+# BAD — config/config.exs
+config :my_app, api_key: System.get_env("API_KEY")
+
+# GOOD — config/runtime.exs
+if config_env() == :prod do
+  config :my_app,
+    api_key: System.fetch_env!("API_KEY")
+end
+```
+
+### G2. `Application.compile_env` in a library
+
+**Why it's bad:** Compiled-in value means users can't override without recompiling.
+
+```elixir
+# BAD — library code
+@timeout Application.compile_env(:my_lib, :timeout, 5_000)
+
+# GOOD — accept config through options
+def start_link(opts) do
+  timeout = Keyword.get(opts, :timeout, 5_000)
+  # ...
+end
+```
+
+### G3. Test config imported into runtime code
+
+**Why it's bad:** Production uses test-only values.
+
+```elixir
+# BAD — config/test.exs imported somewhere production reads
+import_config "test.exs"   # in runtime.exs
+
+# GOOD — test config is isolated to test.exs only
+```
+
+### G4. Hardcoded secrets in source
+
+**Why it's bad:** Secret in VCS = secret on every dev laptop and in history forever.
+
+```elixir
+# BAD
+@api_key "sk_live_abc123..."
+
+# GOOD
+def api_key, do: System.fetch_env!("API_KEY")
+```
+
+---
+
+## H. BEAM-native DB Anti-Patterns (Mnesia / Khepri)
+
+These apply to code that uses `:mnesia` or `:khepri` directly. For deep architectural discussion, see `../elixir-planning/data-ownership-deep.md` §12. For partition semantics, see `../elixir-planning/distributed-elixir.md` §7.
+
+### H1. Mnesia as the primary store for business data
+
+**Why it's bad:** Mnesia's partition behaviour is AP with no arbitration. On netsplit heal, one side's writes are discarded. For business records (users, orders, payments) this is data loss, not graceful degradation. Postgres is the default; Mnesia is for ephemeral cluster state whose loss is acceptable.
+
+```elixir
+# BAD — orders in Mnesia
+:mnesia.create_table(:orders, attributes: [:id, :user_id, :total, :status], disc_copies: [node()])
+
+# GOOD — orders in Postgres; maybe a session cache in Mnesia
+# MyApp.Orders uses Ecto/Repo; MyApp.Sessions uses Mnesia for ephemeral tokens
+```
+
+### H2. Dirty writes for data that must survive a partition
+
+**Why it's bad:** `:mnesia.dirty_write/1` skips both locks and replication coordination. Dirty writes made on the losing side of a partition are silently lost on heal.
+
+```elixir
+# BAD — dirty write on state that must not be lost
+:mnesia.dirty_write({:audit_log, id, user_id, action, timestamp})
+
+# GOOD — transactional write
+:mnesia.transaction(fn -> :mnesia.write({:audit_log, id, user_id, action, timestamp}) end)
+```
+
+Dirty ops are only safe when the caller has named the reason "loss is acceptable" (local caches, metrics counters).
+
+### H3. No `:mnesia.subscribe(:system)` in production
+
+**Why it's bad:** Split-brain is Mnesia's default, not an exception. Without a subscriber, `:inconsistent_database` events go to logs nobody reads and the cluster runs silently degraded.
+
+```elixir
+# BAD — Mnesia.start() called but no watcher
+def start(_, _), do: Supervisor.start_link([...], strategy: :one_for_one)
+
+# GOOD — supervised watcher that pages on :inconsistent_database
+children = [
+  MyApp.Mnesia.Bootstrap,
+  MyApp.Mnesia.Watcher,   # :mnesia.subscribe(:system) + alert on inconsistent_database / mnesia_overload
+  ...
+]
+```
+
+### H4. Overlapping Mnesia and Ecto ownership for one aggregate
+
+**Why it's bad:** No cross-store transaction exists. A "write the order to Postgres, update the summary in Mnesia" flow fails partially under any crash. The aggregate has two sources of truth that disagree.
+
+```elixir
+# BAD — two stores, one aggregate
+def place_order(attrs) do
+  {:ok, order} = Repo.insert(%Order{} = Order.changeset(%Order{}, attrs))
+  :mnesia.transaction(fn -> :mnesia.write({:order_summary, order.user_id, order.total}) end)
+  {:ok, order}
+end
+
+# GOOD — one store per aggregate; the summary is a derived projection
+# Derive summary from Postgres via a query, or maintain it via PubSub → worker
+# with explicit reconciliation.
+```
+
+### H5. Non-deterministic Khepri transaction function
+
+**Why it's bad:** Khepri replays the transaction fun on every Raft member. `System.system_time/0`, `self()`, `:rand.uniform/0`, `Node.self()`, message sends — anything non-deterministic causes each node to apply a *different* state change. The cluster silently corrupts.
+
+```elixir
+# BAD — system_time differs per node
+:khepri.transaction(@store, fn ->
+  :khepri_tx.put([:events, System.system_time()], event)
+end)
+
+# GOOD — compute non-deterministic values outside; pass them in
+now = System.system_time()
+:khepri.transaction(@store, fn ->
+  :khepri_tx.put([:events, now], event)
+end)
+```
+
+This is the Khepri equivalent of a SQL injection: it's not caught by the type system and the symptom shows up far from the cause.
+
+### H6. Blocking work inside a Khepri trigger or projection callback
+
+**Why it's bad:** Triggers run inline on the leader as part of the log applier. HTTP calls, `Logger.info/1` with a slow backend, or `GenServer.call/2` to a contended process all block every subsequent write to the watched path.
+
+```elixir
+# BAD — webhook call in the trigger
+def on_config_change(_path, value) do
+  HTTPClient.post("https://webhook", Jason.encode!(value))   # blocks the applier
+end
+
+# GOOD — hand off to a worker
+def on_config_change(path, value) do
+  send(MyApp.Webhook.Worker, {:changed, path, value})
+  :ok
+end
+```
+
+### H7. 2-node Khepri cluster
+
+**Why it's bad:** Raft needs a majority quorum. With 2 members, majority is 2. Any single failure blocks writes until the failed node returns. A 2-node Khepri is strictly worse than a 1-node Khepri for availability.
+
+```
+# BAD — cluster members: [a@host1, b@host2]
+# host1 crashes → b is minority → all writes blocked
+
+# GOOD — 3 or 5 members, odd count
+# 3 members tolerate 1 failure; 5 tolerate 2
+```
+
+### H8. Mnesia `start/0` without `extra_db_nodes` on a cluster member
+
+**Why it's bad:** A Mnesia node booted without being told its peers forms a standalone cluster of one. Two such nodes booting simultaneously each form their own cluster; a later "heal" is actually a first-contact collision with divergent schemas — Mnesia cannot merge them.
+
+```elixir
+# BAD — node comes up in isolation
+def start(_, _) do
+  :mnesia.start()
+  Supervisor.start_link([...], strategy: :one_for_one)
+end
+
+# GOOD — peer discovery before Mnesia start
+def start(_, _) do
+  peers = MyApp.Discovery.expected_peers()
+  Enum.each(peers, &Node.connect/1)
+  wait_until_peer_visible(peers, 30_000)
+  :mnesia.start()
+  :mnesia.change_config(:extra_db_nodes, peers)
+  Supervisor.start_link([...], strategy: :one_for_one)
+end
+```
+
+### H9. `:mnesia.transform_table/3` under load
+
+**Why it's bad:** `transform_table/3` takes a cluster-wide write lock and rewrites every row. On a large hot table this stalls every writer cluster-wide.
+
+```elixir
+# BAD — run at any time on a large active table
+:mnesia.transform_table(:sessions, &migrate/1, [:id, :user_id, :expires_at, :data, :ip])
+
+# GOOD — additive migration: new table, dual-write, backfill, cutover, drop old
+# 1. Create :sessions_v2 with the new shape
+# 2. Writers dual-write to both tables
+# 3. Backfill :sessions_v2 from :sessions
+# 4. Readers switch to :sessions_v2
+# 5. Drop :sessions
+```
+
+Same three-phase pattern as Postgres destructive migrations (C8).
+
+### H10. Raw Mnesia tuples / Khepri paths leaking out of the context
+
+**Why it's bad:** Callers encode the store's internal shape. Any schema change breaks every caller. Same abstraction violation as C6 ("returning a query from a context").
+
+```elixir
+# BAD — caller depends on tuple position
+def get_session(id), do: :mnesia.dirty_read({:sessions, id})
+# Elsewhere: {_, ^id, user_id, _, _} = Sessions.get_session(id)  ← brittle
+
+# GOOD — context returns a domain struct
+def get_session(id) do
+  case :mnesia.transaction(fn -> :mnesia.read({:sessions, id}) end) do
+    {:atomic, [{:sessions, ^id, user_id, expires_at, data}]} ->
+      {:ok, %Session{id: id, user_id: user_id, expires_at: expires_at, data: data}}
+    {:atomic, []} -> :error
+  end
+end
+```
+
+### H11. Long work inside `:mnesia.transaction/1`
+
+**Why it's bad:** Transactions hold locks and retry on conflict. IO inside a transaction runs every retry, holds locks longer than necessary, and makes deadlock-detection traces useless. Same category as C9 ("long work inside `Repo.transaction`").
+
+```elixir
+# BAD
+:mnesia.transaction(fn ->
+  user = :mnesia.read({Users, id})
+  WebhookClient.notify(user)   # network IO under lock
+  :mnesia.write(updated(user))
+end)
+
+# GOOD — read, commit, then side effects
+{:atomic, user} = :mnesia.transaction(fn -> :mnesia.read({Users, id}) end)
+WebhookClient.notify(user)
+:mnesia.transaction(fn -> :mnesia.write(updated(user)) end)
+```
+
+---
+
+## Cross-References
+
+- **Performance-specific anti-patterns** (with symptom → root cause → fix → evidence): `./performance-catalog.md`
+- **Security-specific anti-patterns** (deep checklist): `./security-audit-deep.md`
+- **Debugging playbook** (symptom → diagnosis): `./debugging-playbook-deep.md`
+- **Review checklists by area** (architecture, control flow, OTP, etc.): `./SKILL.md` §7
+- **Why the idiomatic form is better — implementation templates:** `../elixir-implementing/`

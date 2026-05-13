@@ -1,0 +1,17 @@
+{
+  "_about": "Hook entries for the elixir-guide skill system.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/rationale-marker.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
