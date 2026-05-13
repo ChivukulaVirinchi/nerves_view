@@ -13,13 +13,15 @@ defmodule NervesViewWeb.RecordingsLiveTest do
     :ok
   end
 
-  test "recordings page shows hls playback links", %{conn: conn} do
-    conn = login_via_post(conn, "recordings@example.com", "password123")
+  test "recordings page renders when there are no clips", %{conn: conn} do
+    NervesView.DVR.SegmentIndex.clear()
 
+    conn = login_via_post(conn, "recordings@example.com", "password123")
     assert redirected_to(conn) == ~p"/dashboard"
 
     conn = get(conn, ~p"/recordings")
     html = html_response(conn, 200)
-    assert html =~ "No recordings yet"
+    assert html =~ "No recordings match your filters"
+    assert html =~ "Recordings"
   end
 end

@@ -430,33 +430,65 @@ body::before {
   width: 3px;
 }
 
+/* Absolute-time tick labels positioned along the bottom of the track. The
+   wrapper has a fixed height so labels can never disappear under flex. */
 .tl-labels {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 0.2rem;
-  font-size: 0.55rem;
+  position: relative;
+  height: 1.1rem;
+  margin-top: 0.35rem;
+  font-size: 0.6rem;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   color: var(--muted-foreground);
-  gap: 0.25rem;
 }
 
 .tl-time-lbl {
-  flex-shrink: 0;
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  pointer-events: none;
 }
 
+/* LIVE badge — sits at the right end of the scrubber, separate from labels. */
 .tl-live-lbl {
-  color: var(--color-sage);
+  display: inline-block;
+  margin-top: 0.35rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.6rem;
   font-weight: 700;
+  color: var(--color-sage);
+  background: transparent;
+  border: 1px solid oklch(from var(--color-sage) l c h / 0.4);
+  border-radius: 4px;
   cursor: pointer;
-  flex-shrink: 0;
   letter-spacing: 0.04em;
+  float: right;
+}
+
+.tl-live-lbl.active {
+  color: var(--background);
+  background: var(--color-sage);
+  border-color: var(--color-sage);
 }
 
 .tl-live-lbl:hover {
-  text-decoration: underline;
+  filter: brightness(1.1);
 }
+
+/* Out-of-bounds shaded regions on either side of the retention window. */
+.tl-oob {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--background);
+  opacity: 0.4;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.tl-oob-left  { left: 0; }
+.tl-oob-right { right: 0; }
 
 .cam-tl.scrubbing .tl-track {
   outline: 1px solid oklch(from var(--color-ember) l c h / 0.5);

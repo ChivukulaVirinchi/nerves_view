@@ -264,6 +264,13 @@ defmodule NervesView.Camera.Producer.Libcamera do
     # High profile (640028) and browsers refuse to decode.
     # `--intra 15` forces a keyframe every second at 15fps so a fresh viewer
     # gets a tune-in point quickly instead of waiting up to ~4s.
+    #
+    # Color stability — adaptive but stable: keep AWB on `auto` so it follows
+    # indoor↔outdoor changes, but lock the *decision-making* so AWB and AGC
+    # stop fighting each other:
+    #   --metering average   whole-frame metering (less twitchy than centre)
+    #   --exposure normal    don't auto-switch normal/sport modes
+    #   --saturation/--contrast/--sharpness 1.0  pin the post-processing curves
     args = [
       "-t",
       "0",
@@ -272,6 +279,24 @@ defmodule NervesView.Camera.Producer.Libcamera do
       "h264",
       "--profile",
       "baseline",
+      # Fixed WB. `auto` keeps drifting on IMX219 under indoor LED; `cloudy`
+      # (~6500K) is the most stable default for mixed home lighting. Override
+      # per-deployment if it looks too warm/cool — values are documented in
+      # rpicam-apps: auto|incandescent|tungsten|fluorescent|indoor|daylight|cloudy
+      "--awb",
+      "cloudy",
+      "--metering",
+      "average",
+      "--exposure",
+      "normal",
+      "--saturation",
+      "1.0",
+      "--contrast",
+      "1.0",
+      "--sharpness",
+      "1.0",
+      "--denoise",
+      "cdn_fast",
       "--intra",
       to_string(fps),
       "--framerate",

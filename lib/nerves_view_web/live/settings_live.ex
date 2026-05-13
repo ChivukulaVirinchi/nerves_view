@@ -15,7 +15,15 @@ defmodule NervesViewWeb.SettingsLive do
      |> assign(cameras: NervesView.list_cameras())
      |> assign(diagnostics: NervesView.camera_diagnostics())
      |> assign_cam_form(changeset)
-     |> assign(node_info: node_info())}
+     |> assign(node_info: node_info())
+     |> assign(invite_url: nil)}
+  end
+
+  def handle_event("generate_invite", _, socket) do
+    token = NervesView.generate_invite_token()
+    path = ~p"/register?token=#{token}"
+    url = NervesViewWeb.Endpoint.url() <> path
+    {:noreply, assign(socket, invite_url: url)}
   end
 
   @impl true
@@ -169,6 +177,24 @@ defmodule NervesViewWeb.SettingsLive do
               <p class="stat-lbl">OTP Apps</p>
             </:content></.card>
           </div>
+
+          <.card class="mt-4">
+            <:header><h3 class="font-display font-semibold text-sm">Invite a viewer</h3></:header>
+            <:content>
+              <p class="pg-sub mb-3">
+                Generate a one-time link to let someone else create an account. Valid for 24 hours.
+              </p>
+              <.button phx-click="generate_invite" variant="outline">
+                Generate invite link
+              </.button>
+              <%= if @invite_url do %>
+                <div class="mt-3 p-2 rounded bg-muted">
+                  <div class="font-mono text-xs break-all">{@invite_url}</div>
+                  <p class="pg-sub mt-2 text-xs">Copy and send this link. It expires in 24 hours.</p>
+                </div>
+              <% end %>
+            </:content>
+          </.card>
 
           <.card class="mt-4">
             <:header><h3 class="font-display font-semibold text-sm">Node Details</h3></:header>

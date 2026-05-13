@@ -158,6 +158,32 @@ defmodule NervesView do
   @spec first_boot?() :: boolean()
   def first_boot?, do: list_users() == []
 
+  @invite_max_age 86_400
+
+  @doc """
+  Mint a one-time invite link nonce. Signed with a 24-hour TTL. The admin
+  hands the resulting URL (`/register?token=...`) to whoever they're letting in.
+  """
+  @spec generate_invite_token() :: String.t()
+  def generate_invite_token do
+    nonce = :crypto.strong_rand_bytes(8) |> Base.url_encode64(padding: false)
+    Phoenix.Token.sign(NervesViewWeb.Endpoint, "invite", nonce)
+  end
+
+  @doc """
+  Verify an invite token. Valid for `@invite_max_age` seconds after minting.
+  Returns `:ok` or `{:error, :invalid_token}`.
+  """
+  @spec validate_invite_token(any()) :: :ok | {:error, :invalid_token}
+  def validate_invite_token(token) when is_binary(token) do
+    case Phoenix.Token.verify(NervesViewWeb.Endpoint, "invite", token, max_age: @invite_max_age) do
+      {:ok, _nonce} -> :ok
+      _ -> {:error, :invalid_token}
+    end
+  end
+
+  def validate_invite_token(_), do: {:error, :invalid_token}
+
   @spec notify_motion_event(String.t(), non_neg_integer(), keyword()) ::
           {:ok, map()} | {:error, atom()}
   def notify_motion_event(camera_id, timestamp \\ System.system_time(:second), opts \\ []) do

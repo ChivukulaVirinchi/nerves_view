@@ -24,6 +24,7 @@ defmodule NervesViewWeb.CameraLive do
 
         diag = get_diag(camera_id)
         retention = NervesView.dvr_retention_window(camera_id)
+        today = Date.utc_today()
 
         {:ok,
          socket
@@ -35,7 +36,9 @@ defmodule NervesViewWeb.CameraLive do
          |> assign(retention: retention)
          |> assign(mode: :live)
          |> assign(playback_start_ts: nil)
-         |> assign(motion: nil)}
+         |> assign(motion: nil)
+         |> assign(scrubber_day: today)
+         |> assign(scrubber_day_iso: Date.to_iso8601(today))}
 
       {:error, :not_found} ->
         {:ok,
@@ -50,14 +53,25 @@ defmodule NervesViewWeb.CameraLive do
     cam_id = socket.assigns.camera.id
     diag = get_diag(cam_id)
     retention = NervesView.dvr_retention_window(cam_id)
-    alerts = NervesView.Alerts.list(camera_id: cam_id, since: System.system_time(:second) - dvr_window_seconds())
-    markers = Enum.map(alerts, &%{ts: &1.inserted_at})
+    {oldest, newest} = scrubber_bounds(socket.assigns.scrubber_day, retention)
+
+    alerts = NervesView.Alerts.list(camera_id: cam_id, since: oldest)
+
+    markers =
+      alerts
+      |> Enum.filter(&(&1.inserted_at <= newest))
+      |> Enum.map(&%{ts: &1.inserted_at})
 
     {:noreply,
      socket
      |> assign(diag: diag)
      |> assign(retention: retention)
-     |> push_event("dvr:markers", %{markers: markers, append: false})}
+     |> push_event("dvr:markers", %{markers: markers, append: false})
+     |> push_event("dvr:bounds", %{
+       server_time: System.system_time(:second),
+       oldest: oldest,
+       newest: newest
+     })}
   end
 
   def handle_info({:motion_alert, alert}, socket) do
@@ -83,14 +97,36 @@ defmodule NervesViewWeb.CameraLive do
 
   def handle_event("dvr:seek", %{"camera_id" => cam_id, "from" => from_ts}, socket) do
     from = ensure_int(from_ts)
-    hls_url = "/api/dvr/#{cam_id}/playlist.m3u8?from=#{from}&to=#{from + 600}"
+    {oldest, newest} = socket.assigns.retention || {0, 0}
 
-    {:noreply,
-     socket
-     |> assign(:mode, :playback)
-     |> assign(:playback_start_ts, from)
-     |> push_event("dvr:play", %{url: hls_url})
-     |> push_event("dvr:mode", %{mode: "playback"})}
+    cond do
+      newest == 0 ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "No recordings to play yet.")
+         |> push_event("dvr:seek_rejected", %{reason: "no_recordings"})}
+
+      from < oldest or from > newest ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "That moment is outside the retention window.")
+         |> push_event("dvr:seek_rejected", %{
+           reason: "out_of_bounds",
+           oldest: oldest,
+           newest: newest
+         })}
+
+      true ->
+        to = min(from + 600, newest)
+        hls_url = "/api/dvr/#{cam_id}/playlist.m3u8?from=#{from}&to=#{to}"
+
+        {:noreply,
+         socket
+         |> assign(:mode, :playback)
+         |> assign(:playback_start_ts, from)
+         |> push_event("dvr:play", %{url: hls_url})
+         |> push_event("dvr:mode", %{mode: "playback"})}
+    end
   end
 
   def handle_event("dvr:go_live", _params, socket) do
@@ -113,6 +149,26 @@ defmodule NervesViewWeb.CameraLive do
     end
   end
 
+  def handle_event("dvr:set_day", %{"day" => day_iso}, socket) do
+    case Date.from_iso8601(day_iso) do
+      {:ok, day} ->
+        {oldest, newest} = scrubber_bounds(day, socket.assigns.retention)
+
+        {:noreply,
+         socket
+         |> assign(scrubber_day: day)
+         |> assign(scrubber_day_iso: day_iso)
+         |> push_event("dvr:bounds", %{
+           server_time: System.system_time(:second),
+           oldest: oldest,
+           newest: newest
+         })}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -128,7 +184,7 @@ defmodule NervesViewWeb.CameraLive do
       </div>
 
       <% ok? = @diag && @diag.healthy %>
-      <% {tl_oldest, tl_newest} = @retention || {0, 0} %>
+      <% {tl_oldest, tl_newest} = scrubber_bounds(@scrubber_day, @retention) %>
 
       <.card class="overflow-hidden">
         <:content class="p-0">
@@ -156,11 +212,28 @@ defmodule NervesViewWeb.CameraLive do
             </div>
           </div>
 
-          <%!-- Timeline scrubber --%>
+          <%!-- Day picker above the scrubber. Changing the date moves the
+               scrubber's 24-hour window to that day. --%>
+          <div class="cam-day-picker flex items-center gap-2 px-3 pt-2 text-xs">
+            <span class="text-muted-foreground">Day:</span>
+            <form phx-change="dvr:set_day" class="inline-flex">
+              <input
+                type="date"
+                name="day"
+                value={@scrubber_day_iso}
+                class="input input-sm"
+              />
+            </form>
+          </div>
+
+          <%!-- Timeline scrubber. phx-update="ignore" stops LiveView from
+               re-rendering this div's children every :tick — the hook owns
+               the DOM and gets bounds via the dvr:bounds event instead. --%>
           <div
             id={"tl-#{@camera.id}"}
             class="cam-tl"
             phx-hook="TimelineScrubber"
+            phx-update="ignore"
             data-camera-id={@camera.id}
             data-oldest={tl_oldest}
             data-newest={tl_newest}
@@ -217,6 +290,29 @@ defmodule NervesViewWeb.CameraLive do
   end
 
   defp dvr_window_seconds, do: 30 * 24 * 3600
+
+  # Compute the [oldest, newest] window the scrubber should show. Always a
+  # 24-hour span anchored to the user-selected `day`, but clipped to:
+  #   - the actual retention (no point showing time before recordings exist),
+  #   - "now" on the right edge (don't extend into the future).
+  defp scrubber_bounds(day, retention) do
+    {:ok, day_start_dt} = DateTime.new(day, ~T[00:00:00])
+    {:ok, day_end_dt} = DateTime.new(day, ~T[23:59:59])
+
+    day_start = DateTime.to_unix(day_start_dt)
+    day_end = DateTime.to_unix(day_end_dt)
+    now = System.system_time(:second)
+
+    {ret_oldest, ret_newest} =
+      case retention do
+        {a, b} -> {a, b}
+        _ -> {day_start, now}
+      end
+
+    oldest = max(day_start, ret_oldest)
+    newest = min(min(day_end, now), ret_newest)
+    {oldest, newest}
+  end
 
   defp ensure_int(v) when is_integer(v), do: v
   defp ensure_int(v) when is_binary(v), do: String.to_integer(v)

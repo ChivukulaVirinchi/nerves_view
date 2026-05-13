@@ -62,6 +62,7 @@ defmodule NervesViewWeb.Router do
       live("/dashboard", DashboardLive, :index)
       live("/cameras/:id", CameraLive, :show)
       live("/recordings", RecordingsLive, :index)
+      live("/recordings/:id/play", ClipPlayerLive, :show)
     end
 
     live_session :require_admin_user,

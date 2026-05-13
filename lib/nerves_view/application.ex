@@ -9,6 +9,7 @@ defmodule NervesView.Application do
   def start(_type, _args) do
     :ok = ensure_repo_dir!()
     :ok = migrate_repo!()
+    :ok = maybe_bootstrap_wifi()
 
     children =
       [
@@ -140,6 +141,14 @@ defmodule NervesView.Application do
         # {Target.Worker, arg},
       ]
     end
+  end
+
+  # On Nerves targets only, read /data/wifi.conf and configure wlan0 via
+  # VintageNet so the Pi can auto-join home WiFi without rebuilding firmware.
+  if Mix.target() == :host do
+    defp maybe_bootstrap_wifi, do: :ok
+  else
+    defp maybe_bootstrap_wifi, do: NervesView.Network.WiFiBootstrap.ensure_configured()
   end
 
   defp ensure_repo_dir! do

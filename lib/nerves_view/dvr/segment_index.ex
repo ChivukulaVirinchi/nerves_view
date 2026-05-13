@@ -50,6 +50,49 @@ defmodule NervesView.DVR.SegmentIndex do
     GenServer.call(@name, {:retention_window, camera_id})
   end
 
+  @doc """
+  Returns groups of contiguous segments ("clips") for a camera. Two segments
+  are contiguous if the gap between them is no more than ~2× a segment's
+  duration; longer gaps split the recording into separate clips.
+
+  ## Options
+    * `:from` — UNIX ts; include only clips that overlap from this time forward
+    * `:to`   — UNIX ts; include only clips that overlap up to this time
+  """
+  @spec clips_for(String.t(), keyword()) :: [map()]
+  def clips_for(camera_id, opts \\ []) when is_binary(camera_id) do
+    GenServer.call(@name, {:clips_for, camera_id, opts})
+  end
+
+  @doc """
+  Returns clips across every camera, newest first. Same `:from`/`:to` filters
+  as `clips_for/2`.
+  """
+  @spec all_clips(keyword()) :: [map()]
+  def all_clips(opts \\ []) do
+    GenServer.call(@name, {:all_clips, opts})
+  end
+
+  @doc """
+  Looks up a clip by id (format: `clip-<camera_id>-<started_at_unix>`).
+  Returns the clip map with full segments list.
+  """
+  @spec get_clip(String.t()) :: {:ok, map()} | {:error, :invalid_id | :not_found}
+  def get_clip(clip_id) when is_binary(clip_id) do
+    case Regex.run(~r/^clip-(.+)-(\d+)$/, clip_id) do
+      [_, camera_id, started_at_str] ->
+        started_at = String.to_integer(started_at_str)
+
+        case Enum.find(clips_for(camera_id), &(&1.started_at == started_at)) do
+          nil -> {:error, :not_found}
+          clip -> {:ok, clip}
+        end
+
+      _ ->
+        {:error, :invalid_id}
+    end
+  end
+
   @doc "Clears all state. Used in tests."
   @spec clear() :: :ok
   def clear, do: GenServer.call(@name, :clear)
@@ -119,7 +162,76 @@ defmodule NervesView.DVR.SegmentIndex do
     {:reply, :ok, %{}}
   end
 
+  def handle_call({:clips_for, camera_id, opts}, _from, state) do
+    segs = state |> Map.get(camera_id, []) |> filter_by_window(opts)
+    {:reply, group_into_clips(camera_id, segs), state}
+  end
+
+  def handle_call({:all_clips, opts}, _from, state) do
+    clips =
+      state
+      |> Enum.flat_map(fn {cam, segs} ->
+        group_into_clips(cam, filter_by_window(segs, opts))
+      end)
+      |> Enum.sort_by(& &1.started_at, :desc)
+
+    {:reply, clips, state}
+  end
+
   # ── Helpers ──
+
+  @gap_tolerance_factor 2
+
+  defp filter_by_window(segs, opts) do
+    from = Keyword.get(opts, :from)
+    to = Keyword.get(opts, :to)
+
+    Enum.filter(segs, fn s ->
+      seg_end = s.started_at + s.duration
+      (is_nil(from) or seg_end > from) and (is_nil(to) or s.started_at < to)
+    end)
+  end
+
+  defp group_into_clips(_camera_id, []), do: []
+
+  defp group_into_clips(camera_id, segs) do
+    tolerance = (hd(segs).duration || 6) * @gap_tolerance_factor
+
+    # Walk left-to-right, building clips as we go. Each clip is a list of
+    # segments stored in reverse (newest first inside the clip) for O(1)
+    # prepend; we reverse at the end.
+    grouped =
+      Enum.reduce(segs, [], fn seg, acc ->
+        case acc do
+          [] ->
+            [[seg]]
+
+          [[prev | _] = current | rest] ->
+            if seg.started_at - (prev.started_at + prev.duration) <= tolerance do
+              [[seg | current] | rest]
+            else
+              [[seg] | [current | rest]]
+            end
+        end
+      end)
+
+    grouped
+    |> Enum.reverse()
+    |> Enum.map(fn segs_rev ->
+      clip_segs = Enum.reverse(segs_rev)
+      first = hd(clip_segs)
+      last = List.last(clip_segs)
+
+      %{
+        id: "clip-#{camera_id}-#{first.started_at}",
+        camera_id: camera_id,
+        started_at: first.started_at,
+        ended_at: last.started_at + last.duration,
+        segments: clip_segs,
+        size_bytes: Enum.sum(Enum.map(clip_segs, & &1.size))
+      }
+    end)
+  end
 
   defp insert_sorted([], segment), do: [segment]
 
