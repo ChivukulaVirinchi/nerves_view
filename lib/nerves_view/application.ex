@@ -7,8 +7,12 @@ defmodule NervesView.Application do
 
   @impl true
   def start(_type, _args) do
+    :ok = ensure_repo_dir!()
+    :ok = migrate_repo!()
+
     children =
       [
+        NervesView.Repo,
         {Phoenix.PubSub, name: NervesView.PubSub},
         {Cluster.Supervisor,
          [Application.get_env(:libcluster, :topologies, []), [name: NervesView.ClusterSupervisor]]},
@@ -42,7 +46,6 @@ defmodule NervesView.Application do
         {NervesView.Cluster.NodeRegistry, []},
         {NervesView.Cluster.Heartbeat, []},
         {NervesView.Network.Discovery, []},
-        {NervesView.Accounts.Store, []},
         {NervesView.Accounts.SessionStore, []},
         {NervesView.Alerts, []}
       ] ++ target_children()
@@ -68,13 +71,15 @@ defmodule NervesView.Application do
   end
 
   defp ensure_default_camera_started do
-    # Load CSI camera sensor kernel modules that may not auto-load
-    for mod <- ~w(ov5647 imx219 imx477 imx708) do
-      System.cmd("modprobe", [mod], stderr_to_stdout: true)
-    end
+    if libcamera_available?() do
+      # Load CSI camera sensor kernel modules that may not auto-load
+      for mod <- ~w(ov5647 imx219 imx477 imx708) do
+        safe_cmd("modprobe", [mod])
+      end
 
-    # Wait for the sensor to finish probing after modprobe
-    await_camera_sensor()
+      # Wait for the sensor to finish probing after modprobe
+      await_camera_sensor()
+    end
 
     cameras = NervesView.list_cameras()
 
@@ -93,11 +98,22 @@ defmodule NervesView.Application do
     :ok
   end
 
+  defp libcamera_available?, do: System.find_executable("libcamera-vid") != nil
+
+  defp safe_cmd(cmd, args) do
+    case System.find_executable(cmd) do
+      nil -> :ok
+      _ -> System.cmd(cmd, args, stderr_to_stdout: true)
+    end
+  rescue
+    _ -> :ok
+  end
+
   defp await_camera_sensor(attempts \\ 10)
   defp await_camera_sensor(0), do: :ok
 
   defp await_camera_sensor(attempts) do
-    case System.cmd("libcamera-vid", ["--list-cameras"], stderr_to_stdout: true) do
+    case safe_cmd("libcamera-vid", ["--list-cameras"]) do
       {output, 0} when output != "No cameras available!\n" -> :ok
       _ ->
         Process.sleep(500)
@@ -124,5 +140,26 @@ defmodule NervesView.Application do
         # {Target.Worker, arg},
       ]
     end
+  end
+
+  defp ensure_repo_dir! do
+    case Application.get_env(:nerves_view, NervesView.Repo)[:database] do
+      nil -> :ok
+      path -> File.mkdir_p!(Path.dirname(path)); :ok
+    end
+  end
+
+  # Boot-time migration: Nerves doesn't have `mix ecto.migrate` at runtime, so
+  # we run pending migrations before the Repo starts accepting queries. SQLite
+  # serialises writes, so this is safe to do during boot.
+  defp migrate_repo! do
+    if Code.ensure_loaded?(NervesView.Repo) do
+      {:ok, _, _} =
+        Ecto.Migrator.with_repo(NervesView.Repo, fn repo ->
+          Ecto.Migrator.run(repo, :up, all: true)
+        end)
+    end
+
+    :ok
   end
 end

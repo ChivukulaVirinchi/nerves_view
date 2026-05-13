@@ -68,10 +68,12 @@ defmodule NervesView.Alerts do
 
   def handle_call({:list, opts}, _from, state) do
     camera_id = Keyword.get(opts, :camera_id)
+    since_ts = Keyword.get(opts, :since)
 
     alerts =
       state.alerts
       |> Enum.filter(fn alert -> is_nil(camera_id) or alert.camera_id == camera_id end)
+      |> Enum.filter(fn alert -> is_nil(since_ts) or alert.inserted_at >= since_ts end)
       |> Enum.sort_by(& &1.inserted_at, :desc)
 
     {:reply, alerts, state}

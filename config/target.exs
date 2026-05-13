@@ -116,6 +116,12 @@ config :nerves_view,
   persistence_dir: "/data/nerves_view/persistence",
   recordings_path: "/data/nerves_view/recordings"
 
+config :nerves_view, NervesView.Repo,
+  database: "/data/nerves_view/nerves_view.db",
+  journal_mode: :wal,
+  busy_timeout: 5_000,
+  pool_size: 5
+
 # Import target specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 # Uncomment to use target specific configurations

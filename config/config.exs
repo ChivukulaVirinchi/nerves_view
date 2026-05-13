@@ -19,13 +19,19 @@ config :nerves, :firmware, rootfs_overlay: "rootfs_overlay"
 config :nerves, source_date_epoch: "1774002223"
 
 config :nerves_view,
-  ecto_repos: [],
+  ecto_repos: [NervesView.Repo],
   mode: :standalone,
   recordings_path: "tmp/recordings",
   persistence_dir: "tmp/persistence",
   recording_segment_duration: 6,
   recording_retention_hours: 720,
   ice_servers: [%{urls: "stun:stun.l.google.com:19302"}]
+
+config :nerves_view, NervesView.Repo,
+  database: "tmp/nerves_view.db",
+  journal_mode: :wal,
+  busy_timeout: 5_000,
+  pool_size: 5
 
 config :libcluster, topologies: []
 

@@ -17,18 +17,31 @@ const TimelineScrubber = {
     this.timeOffset = this.serverTime - Math.floor(Date.now() / 1000)
     this.markers = []
     this.dragging = false
-    this.isLive = true
+    this.mode = "live"
 
     this.buildDOM()
     this.bindEvents()
 
-    this.handleEvent("dvr:markers", ({ markers }) => {
-      this.markers = markers || []
+    this.handleEvent("dvr:markers", ({ markers, append }) => {
+      if (append) {
+        this.markers = (this.markers || []).concat(markers || [])
+      } else {
+        this.markers = markers || []
+      }
       this.renderMarkers()
     })
 
+    this.handleEvent("dvr:mode", ({ mode }) => {
+      this.mode = mode
+      this.el.classList.toggle("scrubbing", mode === "playback")
+      if (mode === "live") {
+        this.cursor.style.left = "100%"
+      }
+    })
+
     this.handleEvent("dvr:playback_pos", ({ ts }) => {
-      if (!this.dragging && !this.isLive) {
+      if (this.mode !== "playback") return
+      if (!this.dragging) {
         this.setCursorAt(ts)
       }
     })
@@ -88,7 +101,7 @@ const TimelineScrubber = {
 
     // LIVE button
     this.liveLabel.addEventListener("click", () => {
-      this.isLive = true
+      this.mode = "live"
       this.cursor.style.left = "100%"
       this.fill.style.width = "100%"
       this.pushEvent("dvr:go_live", { camera_id: this.el.dataset.cameraId })
@@ -128,12 +141,12 @@ const TimelineScrubber = {
 
     // If dragged to within 10 seconds of live edge, go live
     if (ts >= now - 10) {
-      this.isLive = true
+      this.mode = "live"
       this.cursor.style.left = "100%"
       this.fill.style.width = "100%"
       this.pushEvent("dvr:go_live", { camera_id: this.el.dataset.cameraId })
     } else {
-      this.isLive = false
+      this.mode = "playback"
       this.pushEvent("dvr:seek", { camera_id: this.el.dataset.cameraId, from: ts })
     }
   },
@@ -181,7 +194,7 @@ const TimelineScrubber = {
         m.title = this.formatTime(ts)
         m.addEventListener("click", (e) => {
           e.stopPropagation()
-          this.isLive = false
+          this.mode = "playback"
           this.setCursorAt(ts)
           this.pushEvent("dvr:seek", { camera_id: this.el.dataset.cameraId, from: ts })
         })

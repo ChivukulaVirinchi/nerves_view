@@ -2,7 +2,7 @@ defmodule NervesViewWeb.SettingsLiveTest do
   use NervesViewWeb.ConnCase, async: false
 
   alias NervesView.Accounts.SessionStore
-  alias NervesView.Accounts.Store
+  alias NervesView.Accounts, as: Store
   alias NervesView.Camera.Registry
 
   setup do

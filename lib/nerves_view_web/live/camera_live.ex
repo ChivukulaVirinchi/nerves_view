@@ -33,7 +33,8 @@ defmodule NervesViewWeb.CameraLive do
          |> assign(diag: diag)
          |> assign(token: token)
          |> assign(retention: retention)
-         |> assign(playback_from: nil)
+         |> assign(mode: :live)
+         |> assign(playback_start_ts: nil)
          |> assign(motion: nil)}
 
       {:error, :not_found} ->
@@ -49,12 +50,24 @@ defmodule NervesViewWeb.CameraLive do
     cam_id = socket.assigns.camera.id
     diag = get_diag(cam_id)
     retention = NervesView.dvr_retention_window(cam_id)
-    {:noreply, socket |> assign(diag: diag) |> assign(retention: retention)}
+    alerts = NervesView.Alerts.list(camera_id: cam_id, since: System.system_time(:second) - dvr_window_seconds())
+    markers = Enum.map(alerts, &%{ts: &1.inserted_at})
+
+    {:noreply,
+     socket
+     |> assign(diag: diag)
+     |> assign(retention: retention)
+     |> push_event("dvr:markers", %{markers: markers, append: false})}
   end
 
   def handle_info({:motion_alert, alert}, socket) do
     if alert.camera_id == socket.assigns.camera.id do
-      {:noreply, assign(socket, :motion, alert)}
+      marker = %{ts: alert.inserted_at}
+
+      {:noreply,
+       socket
+       |> assign(:motion, alert)
+       |> push_event("dvr:markers", %{markers: [marker], append: true})}
     else
       {:noreply, socket}
     end
@@ -69,24 +82,35 @@ defmodule NervesViewWeb.CameraLive do
     do: handle_webrtc_event(event, params, socket)
 
   def handle_event("dvr:seek", %{"camera_id" => cam_id, "from" => from_ts}, socket) do
-    from = if is_binary(from_ts), do: String.to_integer(from_ts), else: from_ts
-    url = "/api/dvr/#{cam_id}/playlist.m3u8?from=#{from}"
+    from = ensure_int(from_ts)
+    hls_url = "/api/dvr/#{cam_id}/playlist.m3u8?from=#{from}&to=#{from + 600}"
 
     {:noreply,
      socket
-     |> assign(:playback_from, from)
-     |> push_event("dvr:play", %{url: url})}
+     |> assign(:mode, :playback)
+     |> assign(:playback_start_ts, from)
+     |> push_event("dvr:play", %{url: hls_url})
+     |> push_event("dvr:mode", %{mode: "playback"})}
   end
 
   def handle_event("dvr:go_live", _params, socket) do
     {:noreply,
      socket
-     |> assign(:playback_from, nil)
-     |> push_event("dvr:live", %{})}
+     |> assign(:mode, :live)
+     |> assign(:playback_start_ts, nil)
+     |> push_event("dvr:live", %{})
+     |> push_event("dvr:mode", %{mode: "live"})}
   end
 
-  def handle_event("dvr:time_update", _params, socket) do
-    {:noreply, socket}
+  def handle_event("dvr:time_update", %{"current_time" => ct}, socket) do
+    case socket.assigns.playback_start_ts do
+      nil ->
+        {:noreply, socket}
+
+      start_ts when is_integer(start_ts) ->
+        ts = start_ts + round(ct)
+        {:noreply, push_event(socket, "dvr:playback_pos", %{ts: ts})}
+    end
   end
 
   @impl true
@@ -154,7 +178,7 @@ defmodule NervesViewWeb.CameraLive do
           </span>
         </div>
 
-        <%= if @playback_from do %>
+        <%= if @mode == :playback do %>
           <.badge variant="outline">Playback</.badge>
         <% end %>
 
@@ -191,5 +215,10 @@ defmodule NervesViewWeb.CameraLive do
     NervesView.camera_diagnostics()
     |> Enum.find(&(&1.camera_id == camera_id))
   end
+
+  defp dvr_window_seconds, do: 30 * 24 * 3600
+
+  defp ensure_int(v) when is_integer(v), do: v
+  defp ensure_int(v) when is_binary(v), do: String.to_integer(v)
 
 end

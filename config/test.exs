@@ -14,6 +14,10 @@ config :nerves_view,
   persistence_dir: "tmp/test_persistence",
   recordings_path: "tmp/test_recordings"
 
+config :nerves_view, NervesView.Repo,
+  database: "tmp/test_nerves_view.db",
+  pool_size: 1
+
 config :logger, level: :warning
 
 config :phoenix, :plug_init_mode, :runtime

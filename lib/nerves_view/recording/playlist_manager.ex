@@ -145,8 +145,9 @@ defmodule NervesView.Recording.PlaylistManager do
     recent = Enum.take(camera_state.segments, -@live_window_size)
 
     # media_sequence = number of segments that have "scrolled off" the playlist.
-    # hls.js uses this to detect new segments on each playlist refresh.
-    media_seq = max(0, total - @live_window_size)
+    # Take the larger of (a) the explicit counter (incremented on removal) and
+    # (b) the implicit window trim (segments older than the live window).
+    media_seq = max(camera_state.media_sequence, max(0, total - @live_window_size))
 
     max_dur =
       recent

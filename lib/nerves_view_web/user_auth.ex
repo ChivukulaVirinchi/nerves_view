@@ -2,8 +2,8 @@ defmodule NervesViewWeb.UserAuth do
   import Plug.Conn
   import Phoenix.Controller
 
+  alias NervesView.Accounts
   alias NervesView.Accounts.SessionStore
-  alias NervesView.Accounts.Store
 
   @session_key "user_token"
 
@@ -94,7 +94,7 @@ defmodule NervesViewWeb.UserAuth do
 
   defp user_from_token(token) when is_binary(token) do
     with {:ok, session} <- SessionStore.fetch(token),
-         {:ok, user} <- Store.get_user(session.user_id) do
+         {:ok, user} <- Accounts.get_user(session.user_id) do
       user
     else
       _ -> nil

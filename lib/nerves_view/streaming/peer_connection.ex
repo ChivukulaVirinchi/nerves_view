@@ -278,7 +278,6 @@ defmodule NervesView.Streaming.PeerConnection do
         _ -> [Map.get(frame, :payload, <<>>)]
       end
       |> Enum.reject(&(&1 == <<>>))
-      |> Enum.map(&rewrite_sps_profile_level/1)
 
     with true <- qlen < @max_mailbox_len,
          true <- state.state == :connected,
@@ -312,19 +311,6 @@ defmodule NervesView.Streaming.PeerConnection do
   end
 
   def handle_info(_, state), do: {:noreply, state}
-
-  # Rewrite the profile_idc/constraint_flags/level_idc bytes of an SPS NAL to
-  # match the `42e01f` (Constrained Baseline level 3.1) advertised in our SDP
-  # answer. libcamera-vid on the Pi Zero 2 W cannot emit level <4.0 so its SPS
-  # claims level_idc=40 even though 640x480@15fps is well within level 3.1's
-  # capacity. Browsers strictly check that the SPS profile-level-id matches the
-  # SDP; rewriting the three header bytes makes Chrome accept the stream.
-  # NAL header: F(1) | NRI(2) | type(5). SPS is type=7, profile_idc=66 is baseline.
-  defp rewrite_sps_profile_level(<<f::1, nri::2, 7::5, 66, _constraints, _level_idc, rest::binary>>) do
-    <<f::1, nri::2, 7::5, 0x42, 0xE0, 0x1F, rest::binary>>
-  end
-
-  defp rewrite_sps_profile_level(nal), do: nal
 
   # H.264 RTP packetization (RFC 6184) — access-unit aware.
   #
@@ -520,6 +506,7 @@ defmodule NervesView.Streaming.PeerConnection do
         %SessionDescription{sdp: sdp} -> sdp
         nil -> state.answer_sdp || state.offer_sdp
       end
+      |> rewrite_h264_level_in_answer()
 
     Logger.info("WebRTC SDP ready with ICE candidates for #{state.camera_id}")
     GenServer.reply(from, {:ok, sdp})
@@ -555,6 +542,19 @@ defmodule NervesView.Streaming.PeerConnection do
   end
 
   defp maybe_add_ice_candidate(_pc, _candidate), do: :ok
+
+  # libcamera-vid on the Pi Zero 2 W cannot emit H.264 below level 4.0, so the
+  # stream's SPS legitimately advertises level_idc=0x28 (4.0). Chrome's offer
+  # usually proposes profile-level-id=42e01f (Constrained Baseline level 3.1)
+  # but explicitly sets `level-asymmetry-allowed=1`, which per RFC 6184 §8.2.2
+  # permits the answerer to choose a different level. Rewriting the answer fmtp
+  # to 42e028 makes Chrome configure its decoder for level 4.0, matching what
+  # we actually send and eliminating PLI-induced freezes.
+  defp rewrite_h264_level_in_answer(sdp) when is_binary(sdp) do
+    Regex.replace(~r/profile-level-id=42[a-fA-F0-9]{2}1[fF]/, sdp, "profile-level-id=42e028")
+  end
+
+  defp rewrite_h264_level_in_answer(other), do: other
 
   defp via(session_id), do: {:via, Registry, {NervesView.Streaming.Registry, session_id}}
 

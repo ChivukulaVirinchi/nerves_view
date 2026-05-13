@@ -3,7 +3,7 @@ defmodule NervesViewTest do
 
   alias NervesView.Camera.Registry
   alias NervesView.Accounts.SessionStore
-  alias NervesView.Accounts.Store, as: AccountStore
+  alias NervesView.Accounts, as: AccountStore
   alias NervesView.Alerts
   alias NervesView.Cluster.NodeRegistry
   alias NervesView.Network.Discovery

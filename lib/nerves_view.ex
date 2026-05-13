@@ -7,9 +7,9 @@ defmodule NervesView do
   alias NervesView.Camera.Registry
   alias NervesView.Diagnostics
   alias NervesView.Cluster.NodeRegistry
+  alias NervesView.Accounts
   alias NervesView.Accounts.Permissions
   alias NervesView.Accounts.SessionStore
-  alias NervesView.Accounts.Store
   alias NervesView.Motion
   alias NervesView.Network.Discovery
   alias NervesView.Pipeline.Manager, as: PipelineManager
@@ -127,13 +127,13 @@ defmodule NervesView do
 
   @spec register_user(String.t(), String.t(), :admin | :viewer) :: {:ok, map()} | {:error, atom()}
   def register_user(email, password, role \\ :viewer) do
-    Store.register(email, password, role)
+    Accounts.register(email, password, role)
   end
 
   @spec login(String.t(), String.t(), keyword()) ::
           {:ok, %{user: map(), session: map()}} | {:error, atom()}
   def login(email, password, opts \\ []) do
-    with {:ok, user} <- Store.authenticate(email, password),
+    with {:ok, user} <- Accounts.authenticate(email, password),
          {:ok, session} <- SessionStore.create(user.id, opts) do
       {:ok, %{user: user, session: session}}
     end
@@ -153,7 +153,7 @@ defmodule NervesView do
   def logout(token), do: SessionStore.revoke(token)
 
   @spec list_users() :: [map()]
-  def list_users, do: Store.list_users()
+  def list_users, do: Accounts.list_users()
 
   @spec first_boot?() :: boolean()
   def first_boot?, do: list_users() == []

@@ -61,6 +61,8 @@ defmodule NervesView.MixProject do
       {:phoenix_live_dashboard, "~> 0.8"},
       {:sutra_ui, "~> 0.3.0"},
       {:ecto, "~> 3.12"},
+      {:ecto_sql, "~> 3.12"},
+      {:ecto_sqlite3, "~> 0.18"},
       {:phoenix_ecto, "~> 4.6"},
       {:jason, "~> 1.4"},
       {:lazy_html, ">= 0.1.0", only: :test},
@@ -70,6 +72,17 @@ defmodule NervesView.MixProject do
       {:gettext, "~> 0.26"},
       {:bcrypt_elixir, "~> 3.0"},
       {:ex_webrtc, "~> 0.16"},
+      # Forked to make verify_cb accept any X.509 cert during the DTLS
+      # handshake — Pi RTCs lag behind the browser's freshly-minted cert's
+      # notBefore at boot, which the upstream verify_cb (whitelists only
+      # X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT) rejects. Fingerprint check
+      # in ex_webrtc post-handshake is the real auth.
+      # Track: github.com/elixir-webrtc/ex_dtls#54
+      #
+      # Before publishing, push the local fork's `fix/openssl3-dgram-mem-bio`
+      # branch and switch this to:
+      #   {:ex_dtls, github: "ChivukulaVirinchi/ex_dtls",
+      #    branch: "fix/openssl3-dgram-mem-bio", override: true}
       {:ex_dtls, path: "../ex_dtls", override: true},
       {:libcluster, "~> 3.3"},
 

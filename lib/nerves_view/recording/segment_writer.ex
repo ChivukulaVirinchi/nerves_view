@@ -182,7 +182,9 @@ defmodule NervesView.Recording.SegmentWriter do
       filename = "seg-#{started_at}.ts"
       path = Path.join(state.dir, filename)
 
-      case File.write(path, ts_binary) do
+      # `:sync` flushes to disk on close — without it a sudden power loss can
+      # leave the most recent segment truncated/corrupt.
+      case File.write(path, ts_binary, [:sync]) do
         :ok ->
           duration = max(System.system_time(:second) - started_at, 1)
           size = byte_size(ts_binary)

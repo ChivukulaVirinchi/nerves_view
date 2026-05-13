@@ -4,7 +4,7 @@ defmodule NervesViewWeb.AuthLiveTest do
   alias NervesView.Accounts.SessionStore
   alias NervesView.Camera.Registry
   alias NervesView.Pipeline.Manager
-  alias NervesView.Accounts.Store
+  alias NervesView.Accounts, as: Store
 
   setup do
     File.rm_rf!("tmp/persistence")

@@ -458,6 +458,16 @@ body::before {
   text-decoration: underline;
 }
 
+.cam-tl.scrubbing .tl-track {
+  outline: 1px solid oklch(from var(--color-ember) l c h / 0.5);
+  outline-offset: 1px;
+}
+
+.cam-tl.scrubbing .tl-cursor {
+  background: var(--color-ember);
+  box-shadow: 0 0 8px oklch(from var(--color-ember) l c h / 0.6);
+}
+
 /* ── Auth ── */
 
 .auth-wrap {
