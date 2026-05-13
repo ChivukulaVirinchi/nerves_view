@@ -14,6 +14,39 @@ defmodule NervesViewWeb.Helpers do
 
   def fmt_ts(_, _format), do: "--:--:--"
 
+  @doc """
+  Format a unix timestamp shifted by the browser's tz offset (minutes).
+  Positive offset = east of UTC (IST +330, EST -300).
+  """
+  def fmt_ts_local(unix, tz_offset_minutes, format \\ "%H:%M:%S")
+  def fmt_ts_local(nil, _tz, _fmt), do: "--:--:--"
+
+  def fmt_ts_local(unix, tz_offset_minutes, format) when is_integer(unix) do
+    case DateTime.from_unix(unix) do
+      {:ok, dt} ->
+        local_dt = DateTime.add(dt, tz_offset_minutes * 60, :second)
+        Calendar.strftime(local_dt, format)
+
+      _ ->
+        "--:--:--"
+    end
+  end
+
+  def fmt_ts_local(_, _tz, _fmt), do: "--:--:--"
+
+  @doc "Convert a naive Date + tz offset (minutes) into a {from_unix, to_unix} UTC window."
+  def date_to_utc_window(date_iso8601, tz_offset_minutes) do
+    with {:ok, date} <- Date.from_iso8601(date_iso8601),
+         {:ok, local_start} <- DateTime.new(date, ~T[00:00:00]),
+         {:ok, local_end} <- DateTime.new(date, ~T[23:59:59]) do
+      from_utc = DateTime.add(local_start, -tz_offset_minutes * 60, :second)
+      to_utc = DateTime.add(local_end, -tz_offset_minutes * 60, :second)
+      {DateTime.to_unix(from_utc), DateTime.to_unix(to_utc)}
+    else
+      _ -> {nil, nil}
+    end
+  end
+
   @doc "Badge variant for pipeline status."
   def pipe_variant(nil), do: "destructive"
 

@@ -16,7 +16,8 @@ defmodule NervesView.Pipeline.Runtime.Target do
                FramePublisher.start_link(
                  camera_id: descriptor.camera_id,
                  source_type: source_type,
-                 source_path: path
+                 source_path: path,
+                 color_config: descriptor[:color_config]
                ) do
           snapshot = FramePublisher.snapshot(publisher_pid)
 

@@ -5,8 +5,8 @@ import Hls from "../vendor/hls.min.js"
 import CameraPlayer from "./hooks/camera_player"
 import ClipPlayer from "./hooks/clip_player"
 import TimelineScrubber from "./hooks/timeline_scrubber"
+import TimezoneDetector from "./hooks/timezone_detect"
 
-// Make Hls available globally for the CameraPlayer hook
 window.Hls = Hls
 
 const csrfToken = document
@@ -19,6 +19,7 @@ const liveSocket = new LiveSocket("/live", Socket, {
     CameraPlayer,
     ClipPlayer,
     TimelineScrubber,
+    TimezoneDetector,
   },
 })
 

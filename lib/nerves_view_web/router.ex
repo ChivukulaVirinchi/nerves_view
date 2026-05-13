@@ -23,6 +23,7 @@ defmodule NervesViewWeb.Router do
     get("/", Plugs.RootRedirect, [])
     get("/recordings/:id/playlist.m3u8", RecordingController, :playlist)
     get("/recordings/:id/segments/:segment", RecordingController, :segment)
+    get("/recordings/:id/download", RecordingController, :download)
     get("/cameras/:camera_id/live.m3u8", RecordingController, :live_playlist)
     get("/cameras/:camera_id/segments/:segment", RecordingController, :live_segment)
     post("/login", SessionController, :create)

@@ -27,6 +27,11 @@ defmodule NervesView.Pipeline.Manager do
     GenServer.call(@name, {:stop_pipeline, camera_id})
   end
 
+  @spec restart_pipeline(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def restart_pipeline(camera_id, opts \\ []) when is_binary(camera_id) do
+    GenServer.call(@name, {:restart_pipeline, camera_id, opts})
+  end
+
   @spec status(String.t()) :: {:ok, map()} | {:error, :not_found}
   def status(camera_id) when is_binary(camera_id) do
     GenServer.call(@name, {:status, camera_id})
@@ -105,6 +110,32 @@ defmodule NervesView.Pipeline.Manager do
       end
 
     {:reply, :ok, next_state}
+  end
+
+  def handle_call({:restart_pipeline, camera_id, opts}, _from, state) do
+    state_after_stop =
+      case Map.pop(state, camera_id) do
+        {nil, s} -> s
+        {pipeline, s} -> :ok = @runtime_module.stop_pipeline(pipeline); s
+      end
+
+    camera = case NervesView.Camera.Registry.get(camera_id) do
+      {:ok, cam} -> Map.from_struct(cam)
+      _ -> nil
+    end
+
+    if camera do
+      case CameraPipeline.build(camera, opts) do
+        {:ok, descriptor} ->
+          descriptor = Map.put(descriptor, :inserted_at, System.system_time(:second))
+          do_start_runtime(descriptor, opts, state_after_stop)
+
+        {:error, reason} ->
+          {:reply, {:error, reason}, state_after_stop}
+      end
+    else
+      {:reply, {:error, :camera_not_found}, state_after_stop}
+    end
   end
 
   def handle_call({:status, camera_id}, _from, state) do

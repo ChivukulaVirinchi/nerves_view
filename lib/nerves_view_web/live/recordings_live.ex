@@ -1,6 +1,8 @@
 defmodule NervesViewWeb.RecordingsLive do
   use NervesViewWeb, :live_view
 
+  import NervesViewWeb.Helpers
+
   alias NervesView.DVR.SegmentIndex
 
   @page_size 50
@@ -14,14 +16,11 @@ defmodule NervesViewWeb.RecordingsLive do
      |> assign(camera_filter: "")
      |> assign(date_filter: "")
      |> assign(page: 1)
+     |> assign(tz_offset: 0)
      |> assign_filter_form()
      |> load_clips()}
   end
 
-  # The filter form is a plain map-backed Phoenix.HTML.Form. Using to_form/2
-  # makes LiveView track input state correctly across re-renders — without it,
-  # the inputs freeze after the first change (LiveView doesn't know how to
-  # diff bare HTML inputs whose `value` came from server-side assigns).
   defp assign_filter_form(socket) do
     assign(socket, :filter_form,
       to_form(%{
@@ -32,6 +31,11 @@ defmodule NervesViewWeb.RecordingsLive do
   end
 
   @impl true
+  def handle_event("tz:offset", %{"offset_minutes" => offset}, socket) do
+    off = String.to_integer(offset)
+    {:noreply, assign(socket, tz_offset: off)}
+  end
+
   def handle_event("filter", %{"filter" => %{"camera_id" => cam, "date" => date}}, socket) do
     {:noreply,
      socket
@@ -45,14 +49,8 @@ defmodule NervesViewWeb.RecordingsLive do
     {:noreply, socket |> assign(page: n) |> paginate_visible()}
   end
 
-  # ── Data ────────────────────────────────────────────────────────────────
-
-  # Pull clips from the SegmentIndex (already in memory, rebuilt on boot)
-  # with the current camera + date filters applied. Group them by their
-  # local YYYY-MM-DD date for the UI day-headers, then page within the flat
-  # list.
   defp load_clips(socket) do
-    {from, to} = date_window(socket.assigns.date_filter)
+    {from, to} = date_window(socket.assigns.date_filter, socket.assigns.tz_offset)
 
     clips =
       socket.assigns.camera_filter
@@ -77,22 +75,11 @@ defmodule NervesViewWeb.RecordingsLive do
     |> assign(total_bytes: Enum.sum(Enum.map(socket.assigns.all_clips, & &1.size_bytes)))
   end
 
-  # "" → no filter; "YYYY-MM-DD" → window from local-day-start to local-day-end.
-  defp date_window(""), do: {nil, nil}
+  defp date_window("", _tz_offset), do: {nil, nil}
 
-  defp date_window(date_str) do
-    case Date.from_iso8601(date_str) do
-      {:ok, date} ->
-        {:ok, start_dt} = DateTime.new(date, ~T[00:00:00])
-        {:ok, end_dt} = DateTime.new(date, ~T[23:59:59])
-        {DateTime.to_unix(start_dt), DateTime.to_unix(end_dt)}
-
-      _ ->
-        {nil, nil}
-    end
+  defp date_window(date_str, tz_offset) do
+    date_to_utc_window(date_str, tz_offset)
   end
-
-  # ── Render ─────────────────────────────────────────────────────────────
 
   @impl true
   def render(assigns) do
@@ -151,7 +138,7 @@ defmodule NervesViewWeb.RecordingsLive do
         </.empty>
       <% else %>
         <.data_table rows={@visible_clips} class="mt-5">
-          <:col :let={clip} label="Started">{format_ts(clip.started_at)}</:col>
+          <:col :let={clip} label="Started">{format_ts(clip.started_at, @tz_offset)}</:col>
           <:col :let={clip} label="Camera">{clip.camera_id}</:col>
           <:col :let={clip} label="Length">{format_duration(clip.started_at, clip.ended_at)}</:col>
           <:col :let={clip} label="Size">{format_bytes(clip.size_bytes)}</:col>
@@ -186,21 +173,16 @@ defmodule NervesViewWeb.RecordingsLive do
     """
   end
 
-  # ── Formatting ─────────────────────────────────────────────────────────
+  defp format_ts(unix, tz_offset) when is_integer(unix) do
+    fmt_ts_local(unix, tz_offset, "%b %d, %H:%M:%S")
+  end
+
+  defp format_ts(_, _tz_offset), do: "—"
 
   defp format_bytes(bytes) when bytes < 1024, do: "#{bytes} B"
   defp format_bytes(bytes) when bytes < 1_048_576, do: "#{Float.round(bytes / 1024, 1)} KB"
   defp format_bytes(bytes) when bytes < 1_073_741_824, do: "#{Float.round(bytes / 1_048_576, 1)} MB"
   defp format_bytes(bytes), do: "#{Float.round(bytes / 1_073_741_824, 1)} GB"
-
-  defp format_ts(unix) when is_integer(unix) do
-    case DateTime.from_unix(unix) do
-      {:ok, dt} -> Calendar.strftime(dt, "%b %d, %H:%M:%S")
-      _ -> "—"
-    end
-  end
-
-  defp format_ts(_), do: "—"
 
   defp format_duration(started, ended) when is_integer(started) and is_integer(ended) do
     secs = max(ended - started, 0)

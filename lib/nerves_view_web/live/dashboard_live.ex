@@ -26,7 +26,8 @@ defmodule NervesViewWeb.DashboardLive do
      |> assign(motions: %{})
      |> assign(token: token)
      |> assign(grid: 4)
-     |> assign(stats: sys_stats())}
+     |> assign(stats: sys_stats())
+     |> assign(tz_offset: 0)}
   end
 
   @impl true
@@ -54,6 +55,11 @@ defmodule NervesViewWeb.DashboardLive do
       end
 
     {:noreply, assign(socket, :grid, v)}
+  end
+
+  def handle_event("tz:offset", %{"offset_minutes" => offset}, socket) do
+    off = String.to_integer(offset)
+    {:noreply, assign(socket, tz_offset: off)}
   end
 
   @impl true
@@ -114,7 +120,7 @@ defmodule NervesViewWeb.DashboardLive do
                     </div>
                     <div class="cam-hud-r">
                       <span class="cam-hud-t">{cam.id}</span>
-                      <span class="cam-hud-t">{fmt_ts(frm)}</span>
+                      <span class="cam-hud-t">{fmt_ts_local(frm, @tz_offset)}</span>
                     </div>
                   </div>
                 </div>

@@ -217,8 +217,20 @@ defmodule NervesView do
 
   @spec restart_camera_pipeline(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def restart_camera_pipeline(camera_id, opts \\ []) when is_binary(camera_id) do
-    :ok = PipelineManager.stop_pipeline(camera_id)
-    start_camera_pipeline(camera_id, opts)
+    PipelineManager.restart_pipeline(camera_id, opts)
+  end
+
+  @spec get_camera_color_config(String.t()) :: NervesView.Camera.Config.t()
+  def get_camera_color_config(camera_id) when is_binary(camera_id) do
+    case Registry.get_config(camera_id) do
+      {:ok, config} -> config
+      _ -> %NervesView.Camera.Config{}
+    end
+  end
+
+  @spec set_camera_color_config(String.t(), map()) :: :ok | {:error, term()}
+  def set_camera_color_config(camera_id, attrs) when is_binary(camera_id) and is_map(attrs) do
+    Registry.put_config(camera_id, attrs)
   end
 
   @spec camera_diagnostics() :: [map()]

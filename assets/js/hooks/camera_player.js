@@ -17,7 +17,7 @@ const CameraPlayer = {
     this.hls = null
 
     // DVR mode switches
-    this.handleEvent("dvr:play", ({ url }) => this.switchToHLS(url))
+    this.handleEvent("dvr:play", ({ url, start_offset }) => this.switchToHLS(url, start_offset))
     this.handleEvent("dvr:live", () => this.switchToLive())
 
     // Start live via WebRTC (low latency)
@@ -192,7 +192,7 @@ const CameraPlayer = {
 
   // ── HLS (playback) ──
 
-  switchToHLS(url) {
+  switchToHLS(url, startOffset = 0) {
     this.mode = "playback"
     this.teardownWebRTC()
     this.el.srcObject = null
@@ -203,10 +203,16 @@ const CameraPlayer = {
       this.hls.attachMedia(this.el)
       this.hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
         this.el.play().catch(() => {})
+        if (startOffset > 0) {
+          this.el.currentTime = startOffset
+        }
       })
     } else if (this.el.canPlayType("application/vnd.apple.mpegurl")) {
       this.el.src = url
       this.el.play().catch(() => {})
+      if (startOffset > 0) {
+        this.el.currentTime = startOffset
+      }
     }
 
     this.el.ontimeupdate = () => {

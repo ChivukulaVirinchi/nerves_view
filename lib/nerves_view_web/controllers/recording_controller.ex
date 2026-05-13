@@ -26,6 +26,48 @@ defmodule NervesViewWeb.RecordingController do
     end
   end
 
+  @doc """
+  Serve a single downloadable file concatenating all TS segments of a clip.
+  Uses `Plug.Conn.send_chunked/2` to stream without buffering the whole file
+  in memory — important on Pi Zero 2 W's limited RAM.
+
+  Response headers:
+    Content-Type: video/mp2t  (most players recognize .ts)
+    Content-Disposition: attachment  (forces save dialog, not inline play)
+  """
+  def download(conn, %{"id" => clip_id}) do
+    case SegmentIndex.get_clip(clip_id) do
+      {:ok, %{camera_id: camera_id, started_at: started_at, segments: segments}} ->
+        filename = filename(camera_id, started_at)
+
+        conn =
+          conn
+          |> put_resp_content_type("video/mp2t")
+          |> put_resp_header(
+            "content-disposition",
+            ~s(attachment; filename="#{filename}")
+          )
+          |> send_chunked(200)
+
+        Enum.reduce_while(segments, conn, fn seg, conn_acc ->
+          path = seg.path || segment_path(camera_id, seg.filename)
+
+          case File.read(path) do
+            {:ok, body} ->
+              {:cont, chunk(conn_acc, body)}
+
+            {:error, _reason} ->
+              {:halt, conn_acc}
+          end
+        end)
+
+      {:error, _} ->
+        conn
+        |> put_status(:not_found)
+        |> text("not found")
+    end
+  end
+
   @doc "Backwards-compat: redirect old segment URLs to the DVR endpoint."
   def segment(conn, %{"id" => clip_id, "segment" => segment}) do
     case SegmentIndex.get_clip(clip_id) do
@@ -45,7 +87,6 @@ defmodule NervesViewWeb.RecordingController do
 
     case File.read(path) do
       {:ok, body} ->
-        # Rewrite segment filenames to use the live segment route
         rewritten =
           Regex.replace(~r/(seg-\d+\.ts)/, body, fn _, filename ->
             "/cameras/#{camera_id}/segments/#{filename}"
@@ -64,7 +105,6 @@ defmodule NervesViewWeb.RecordingController do
   end
 
   def live_segment(conn, %{"camera_id" => camera_id, "segment" => segment}) do
-    # Validate filename to prevent path traversal
     unless Regex.match?(~r/^seg-\d+\.ts$/, segment) do
       conn
       |> put_status(:bad_request)
@@ -84,5 +124,19 @@ defmodule NervesViewWeb.RecordingController do
         |> text("segment not found")
       end
     end
+  end
+
+  defp filename(camera_id, started_at) do
+    ts_label =
+      started_at
+      |> DateTime.from_unix!()
+      |> Calendar.strftime("%Y-%m-%d_%H%M%S")
+
+    "nervesview-#{camera_id}-#{ts_label}.ts"
+  end
+
+  defp segment_path(camera_id, filename) do
+    recordings_path = Application.get_env(:nerves_view, :recordings_path, "tmp/recordings")
+    Path.join([recordings_path, camera_id, filename])
   end
 end

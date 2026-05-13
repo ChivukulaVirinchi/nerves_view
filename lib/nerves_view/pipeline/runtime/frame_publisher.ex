@@ -21,10 +21,17 @@ defmodule NervesView.Pipeline.Runtime.FramePublisher do
     camera_id = Keyword.fetch!(opts, :camera_id)
     source_type = Keyword.get(opts, :source_type, :synthetic)
     source_path = Keyword.get(opts, :source_path, "synthetic://pattern")
+    color_config = Keyword.get(opts, :color_config)
+
+    producer_opts =
+      [source_type: source_type, source_path: source_path]
+      |> then(fn base ->
+        if color_config, do: Keyword.put(base, :color_config, color_config), else: base
+      end)
 
     producer_module = Producer.module_for(source_type)
 
-    case producer_module.start_link(source_type: source_type, source_path: source_path) do
+    case producer_module.start_link(producer_opts) do
       {:ok, producer_pid} ->
         Process.send_after(self(), :tick, @tick_ms)
 

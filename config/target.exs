@@ -45,8 +45,8 @@ config :nerves_ssh,
 # Update regulatory_domain to your 2-letter country code E.g., "US"
 #
 # See https://github.com/nerves-networking/vintage_net for more information
-wifi_ssid = System.get_env("NERVES_WIFI_SSID") || ""
-wifi_psk = System.get_env("NERVES_WIFI_PSK") || ""
+wifi_ssid = System.get_env("NERVES_WIFI_SSID") || "Tenda_0E98A0"
+wifi_psk = System.get_env("NERVES_WIFI_PSK") || "61338806"
 
 wifi_config =
   if wifi_ssid != "" and wifi_psk != "" do

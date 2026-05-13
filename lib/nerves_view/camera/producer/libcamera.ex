@@ -36,11 +36,12 @@ defmodule NervesView.Camera.Producer.Libcamera do
     width = Keyword.get(opts, :width, 640)
     height = Keyword.get(opts, :height, 480)
     fps = Keyword.get(opts, :fps, 15)
+    color_config = Keyword.get(opts, :color_config, %NervesView.Camera.Config{})
 
     kill_orphaned_libcamera_vid()
 
     with {:ok, exec} <- find_libcamera_vid(),
-         {:ok, port} <- open_port(exec, width, height, fps) do
+         {:ok, port} <- open_port(exec, width, height, fps, color_config) do
       now = System.system_time(:second)
       Process.send_after(self(), :tick, @tick_ms)
 
@@ -49,18 +50,22 @@ defmodule NervesView.Camera.Producer.Libcamera do
          source_type: :libcamera,
          source_path: source_path,
          started_at: now,
-         last_frame_at: now,
-         healthy: true,
-         last_error: nil,
-         sequence: 0,
-         timestamp: 0,
-         payload: <<>>,
-         au_queue: :queue.new(),
-         pending_nals: [],
-         buffer: <<>>,
-         port: port,
-         exec: exec
-       }}
+          last_frame_at: now,
+          healthy: true,
+          last_error: nil,
+          sequence: 0,
+          timestamp: 0,
+          payload: <<>>,
+          au_queue: :queue.new(),
+          pending_nals: [],
+          buffer: <<>>,
+          port: port,
+          exec: exec,
+          color_config: color_config,
+          width: width,
+          height: height,
+          fps: fps
+        }}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -136,7 +141,12 @@ defmodule NervesView.Camera.Producer.Libcamera do
   end
 
   def handle_info(:restart_port, state) do
-    case open_port(state.exec, 640, 480, 15) do
+    w = Map.get(state, :width, 640)
+    h = Map.get(state, :height, 480)
+    fps = Map.get(state, :fps, 15)
+    color_config = Map.get(state, :color_config, %NervesView.Camera.Config{})
+
+    case open_port(state.exec, w, h, fps, color_config) do
       {:ok, new_port} ->
         Logger.info("libcamera-vid restarted successfully")
         {:noreply, %{state | port: new_port, buffer: <<>>, healthy: true, last_error: nil}}
@@ -258,19 +268,13 @@ defmodule NervesView.Camera.Producer.Libcamera do
     end
   end
 
-  defp open_port(exec, width, height, fps) do
-    # `--profile baseline` so the SPS profile_idc matches what the WebRTC SDP
-    # advertises (Constrained Baseline). Without it, libcamera defaults to
-    # High profile (640028) and browsers refuse to decode.
-    # `--intra 15` forces a keyframe every second at 15fps so a fresh viewer
-    # gets a tune-in point quickly instead of waiting up to ~4s.
-    #
-    # Color stability — adaptive but stable: keep AWB on `auto` so it follows
-    # indoor↔outdoor changes, but lock the *decision-making* so AWB and AGC
-    # stop fighting each other:
-    #   --metering average   whole-frame metering (less twitchy than centre)
-    #   --exposure normal    don't auto-switch normal/sport modes
-    #   --saturation/--contrast/--sharpness 1.0  pin the post-processing curves
+  defp open_port(exec, width, height, fps, color_config) do
+    awb = Map.get(color_config, :awb_mode, :auto) |> Atom.to_string()
+    exposure = Map.get(color_config, :exposure_mode, :normal) |> Atom.to_string()
+    saturation = Map.get(color_config, :saturation, 1.0) |> Float.to_string()
+    contrast = Map.get(color_config, :contrast, 1.0) |> Float.to_string()
+    sharpness = Map.get(color_config, :sharpness, 1.0) |> Float.to_string()
+
     args = [
       "-t",
       "0",
@@ -279,22 +283,18 @@ defmodule NervesView.Camera.Producer.Libcamera do
       "h264",
       "--profile",
       "baseline",
-      # Fixed WB. `auto` keeps drifting on IMX219 under indoor LED; `cloudy`
-      # (~6500K) is the most stable default for mixed home lighting. Override
-      # per-deployment if it looks too warm/cool — values are documented in
-      # rpicam-apps: auto|incandescent|tungsten|fluorescent|indoor|daylight|cloudy
       "--awb",
-      "cloudy",
+      awb,
       "--metering",
       "average",
       "--exposure",
-      "normal",
+      exposure,
       "--saturation",
-      "1.0",
+      saturation,
       "--contrast",
-      "1.0",
+      contrast,
       "--sharpness",
-      "1.0",
+      sharpness,
       "--denoise",
       "cdn_fast",
       "--intra",
