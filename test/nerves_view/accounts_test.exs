@@ -19,7 +19,10 @@ defmodule NervesView.AccountsTest do
 
   test "rejects duplicate email and short password" do
     assert {:ok, _} = Accounts.register("viewer@example.com", "password123", :viewer)
-    assert {:error, :email_taken} = Accounts.register("viewer@example.com", "password123", :viewer)
+
+    assert {:error, :email_taken} =
+             Accounts.register("viewer@example.com", "password123", :viewer)
+
     assert {:error, :password_too_short} = Accounts.register("x@example.com", "short", :viewer)
   end
 
@@ -29,7 +32,8 @@ defmodule NervesView.AccountsTest do
   end
 
   test "authenticate rejects unknown email" do
-    assert {:error, :invalid_credentials} = Accounts.authenticate("nobody@example.com", "whatever")
+    assert {:error, :invalid_credentials} =
+             Accounts.authenticate("nobody@example.com", "whatever")
   end
 
   test "rejects invalid email format" do

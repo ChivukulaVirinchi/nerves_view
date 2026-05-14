@@ -22,11 +22,16 @@ defmodule NervesViewWeb.RecordingsLive do
   end
 
   defp assign_filter_form(socket) do
-    assign(socket, :filter_form,
-      to_form(%{
-        "camera_id" => socket.assigns.camera_filter,
-        "date" => socket.assigns.date_filter
-      }, as: "filter")
+    assign(
+      socket,
+      :filter_form,
+      to_form(
+        %{
+          "camera_id" => socket.assigns.camera_filter,
+          "date" => socket.assigns.date_filter
+        },
+        as: "filter"
+      )
     )
   end
 
@@ -181,7 +186,10 @@ defmodule NervesViewWeb.RecordingsLive do
 
   defp format_bytes(bytes) when bytes < 1024, do: "#{bytes} B"
   defp format_bytes(bytes) when bytes < 1_048_576, do: "#{Float.round(bytes / 1024, 1)} KB"
-  defp format_bytes(bytes) when bytes < 1_073_741_824, do: "#{Float.round(bytes / 1_048_576, 1)} MB"
+
+  defp format_bytes(bytes) when bytes < 1_073_741_824,
+    do: "#{Float.round(bytes / 1_048_576, 1)} MB"
+
   defp format_bytes(bytes), do: "#{Float.round(bytes / 1_073_741_824, 1)} GB"
 
   defp format_duration(started, ended) when is_integer(started) and is_integer(ended) do

@@ -6,9 +6,9 @@ defmodule NervesView.Accounts.LoginParams do
 
   @primary_key false
   embedded_schema do
-    field :email, :string, default: ""
-    field :password, :string, default: ""
-    field :remember_me, :boolean, default: false
+    field(:email, :string, default: "")
+    field(:password, :string, default: "")
+    field(:remember_me, :boolean, default: false)
   end
 
   @spec changeset(map()) :: Ecto.Changeset.t()

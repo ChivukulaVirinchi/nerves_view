@@ -36,6 +36,7 @@ defmodule NervesViewWeb.CameraLive do
          |> assign(retention: retention)
          |> assign(mode: :live)
          |> assign(playback_start_ts: nil)
+         |> assign(playback_base_ts: nil)
          |> assign(motion: nil)
          |> assign(tz_offset: 0)
          |> assign(scrubber_day: nil)
@@ -56,7 +57,9 @@ defmodule NervesViewWeb.CameraLive do
     cam_id = socket.assigns.camera.id
     diag = get_diag(cam_id)
     retention = NervesView.dvr_retention_window(cam_id)
-    {oldest, newest} = scrubber_bounds(socket.assigns.scrubber_day, retention, socket.assigns.tz_offset)
+
+    {oldest, newest} =
+      scrubber_bounds(socket.assigns.scrubber_day, retention, socket.assigns.tz_offset)
 
     alerts = NervesView.Alerts.list(camera_id: cam_id, since: oldest)
 
@@ -92,7 +95,9 @@ defmodule NervesViewWeb.CameraLive do
 
   def handle_info({:ex_webrtc, _, _} = msg, socket), do: handle_webrtc_info(msg, socket)
   def handle_info({:pipeline_frame, _, _} = msg, socket), do: handle_webrtc_info(msg, socket)
-  def handle_info({:webrtc_negotiated, _, _, _, _} = msg, socket), do: handle_webrtc_info(msg, socket)
+
+  def handle_info({:webrtc_negotiated, _, _, _, _} = msg, socket),
+    do: handle_webrtc_info(msg, socket)
 
   @impl true
   def handle_event("tz:offset", %{"offset_minutes" => offset}, socket) do
@@ -117,6 +122,12 @@ defmodule NervesViewWeb.CameraLive do
     {oldest, newest} = socket.assigns.retention || {0, 0}
 
     cond do
+      cam_id != socket.assigns.camera.id ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Camera mismatch.")
+         |> push_event("dvr:seek_rejected", %{reason: "camera_mismatch"})}
+
       newest == 0 ->
         {:noreply,
          socket
@@ -136,12 +147,13 @@ defmodule NervesViewWeb.CameraLive do
       true ->
         to = min(from + 600, newest)
         hls_url = "/api/dvr/#{cam_id}/playlist.m3u8?from=#{from}&to=#{to}"
-        start_offset = compute_start_offset(cam_id, from)
+        {playback_base, start_offset} = compute_playback_base_and_offset(cam_id, from)
 
         {:noreply,
          socket
          |> assign(:mode, :playback)
          |> assign(:playback_start_ts, from)
+         |> assign(:playback_base_ts, playback_base)
          |> push_event("dvr:play", %{url: hls_url, start_offset: start_offset})
          |> push_event("dvr:mode", %{mode: "playback"})}
     end
@@ -152,17 +164,18 @@ defmodule NervesViewWeb.CameraLive do
      socket
      |> assign(:mode, :live)
      |> assign(:playback_start_ts, nil)
+     |> assign(:playback_base_ts, nil)
      |> push_event("dvr:live", %{})
      |> push_event("dvr:mode", %{mode: "live"})}
   end
 
   def handle_event("dvr:time_update", %{"current_time" => ct}, socket) do
-    case socket.assigns.playback_start_ts do
+    case socket.assigns.playback_base_ts do
       nil ->
         {:noreply, socket}
 
-      start_ts when is_integer(start_ts) ->
-        ts = start_ts + round(ct)
+      base_ts when is_integer(base_ts) ->
+        ts = base_ts + round(ct)
         {:noreply, push_event(socket, "dvr:playback_pos", %{ts: ts})}
     end
   end
@@ -170,7 +183,8 @@ defmodule NervesViewWeb.CameraLive do
   def handle_event("dvr:set_day", %{"day" => day_iso}, socket) do
     case Date.from_iso8601(day_iso) do
       {:ok, day} ->
-        {oldest, newest} = scrubber_bounds(day, socket.assigns.retention, socket.assigns.tz_offset)
+        {oldest, newest} =
+          scrubber_bounds(day, socket.assigns.retention, socket.assigns.tz_offset)
 
         {:noreply,
          socket
@@ -192,18 +206,24 @@ defmodule NervesViewWeb.CameraLive do
   end
 
   def handle_event("update_color", params, socket) do
-    awb = params["awb_mode"] || "auto"
+    awb =
+      parse_known_atom(
+        params["awb_mode"],
+        ~w(auto indoor daylight cloudy fluorescent tungsten incandescent),
+        :auto
+      )
+
     sat = params["saturation"] || "1.0"
     con = params["contrast"] || "1.0"
     sharp = params["sharpness"] || "1.0"
-    exp = params["exposure_mode"] || "normal"
+    exp = parse_known_atom(params["exposure_mode"], ~w(normal short long), :normal)
 
     new_config = %NervesView.Camera.Config{
-      awb_mode: String.to_atom(awb),
+      awb_mode: awb,
       saturation: parse_param_float(sat, 1.0),
       contrast: parse_param_float(con, 1.0),
       sharpness: parse_param_float(sharp, 1.0),
-      exposure_mode: String.to_atom(exp)
+      exposure_mode: exp
     }
 
     {:noreply, assign(socket, color_config: new_config)}
@@ -479,12 +499,12 @@ defmodule NervesViewWeb.CameraLive do
     {oldest, newest}
   end
 
-  defp compute_start_offset(camera_id, from_ts) do
+  defp compute_playback_base_and_offset(camera_id, from_ts) do
     segs = NervesView.DVR.SegmentIndex.segments_for(camera_id, from_ts, from_ts + 600)
 
     case segs do
-      [] -> 0
-      [first | _] -> max(0, from_ts - first.started_at)
+      [] -> {from_ts, 0}
+      [first | _] -> {first.started_at, max(0, from_ts - first.started_at)}
     end
   end
 
@@ -499,4 +519,10 @@ defmodule NervesViewWeb.CameraLive do
   end
 
   defp parse_param_float(_, default), do: default
+
+  defp parse_known_atom(value, allowed, default) when is_binary(value) do
+    if value in allowed, do: String.to_existing_atom(value), else: default
+  end
+
+  defp parse_known_atom(_, _allowed, default), do: default
 end

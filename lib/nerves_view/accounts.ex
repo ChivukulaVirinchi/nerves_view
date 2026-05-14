@@ -92,6 +92,7 @@ defmodule NervesView.Accounts do
     cond do
       Keyword.has_key?(errors, :email) ->
         msg = errors |> Keyword.get(:email) |> elem(0)
+
         cond do
           String.contains?(msg, "taken") -> :email_taken
           String.contains?(msg, "valid email") -> :invalid_email

@@ -37,7 +37,16 @@ defmodule NervesViewWeb.DVRControllerTest do
       Application.put_env(:nerves_view, :recordings_path, "tmp/recordings")
     end)
 
-    {:ok, now: now}
+    email = "dvr-#{System.unique_integer([:positive])}@example.com"
+    conn = register_via_post(Phoenix.ConnTest.build_conn(), email, "password123")
+
+    {:ok, conn: conn, now: now}
+  end
+
+  test "GET /api/dvr/:camera_id/playlist.m3u8 requires authentication", %{now: now} do
+    from = now - 20
+    conn = get(Phoenix.ConnTest.build_conn(), "/api/dvr/#{@camera_id}/playlist.m3u8?from=#{from}")
+    assert json_response(conn, 401)["error"] == "unauthenticated"
   end
 
   test "GET /api/dvr/:camera_id/playlist.m3u8 returns valid playlist", %{conn: conn, now: now} do

@@ -50,22 +50,22 @@ defmodule NervesView.Camera.Producer.Libcamera do
          source_type: :libcamera,
          source_path: source_path,
          started_at: now,
-          last_frame_at: now,
-          healthy: true,
-          last_error: nil,
-          sequence: 0,
-          timestamp: 0,
-          payload: <<>>,
-          au_queue: :queue.new(),
-          pending_nals: [],
-          buffer: <<>>,
-          port: port,
-          exec: exec,
-          color_config: color_config,
-          width: width,
-          height: height,
-          fps: fps
-        }}
+         last_frame_at: now,
+         healthy: true,
+         last_error: nil,
+         sequence: 0,
+         timestamp: 0,
+         payload: <<>>,
+         au_queue: :queue.new(),
+         pending_nals: [],
+         buffer: <<>>,
+         port: port,
+         exec: exec,
+         color_config: color_config,
+         width: width,
+         height: height,
+         fps: fps
+       }}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -114,7 +114,13 @@ defmodule NervesView.Camera.Producer.Libcamera do
 
       {nal_units, rest} ->
         {pending, au_queue, seq, ts} =
-          group_into_aus(nal_units, state.pending_nals, state.au_queue, state.sequence, state.timestamp)
+          group_into_aus(
+            nal_units,
+            state.pending_nals,
+            state.au_queue,
+            state.sequence,
+            state.timestamp
+          )
 
         latest_nal = List.last(nal_units)
 

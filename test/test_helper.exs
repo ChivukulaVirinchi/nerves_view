@@ -3,7 +3,9 @@ Application.put_env(:phoenix, :plug_init_mode, :runtime)
 # Fresh test DB each run: delete the SQLite file, then bring up the Repo
 # (without starting the full Application) and run migrations.
 case Application.get_env(:nerves_view, NervesView.Repo)[:database] do
-  nil -> :ok
+  nil ->
+    :ok
+
   path ->
     File.mkdir_p!(Path.dirname(path))
     File.rm(path)

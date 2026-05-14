@@ -115,14 +115,19 @@ defmodule NervesView.Pipeline.Manager do
   def handle_call({:restart_pipeline, camera_id, opts}, _from, state) do
     state_after_stop =
       case Map.pop(state, camera_id) do
-        {nil, s} -> s
-        {pipeline, s} -> :ok = @runtime_module.stop_pipeline(pipeline); s
+        {nil, s} ->
+          s
+
+        {pipeline, s} ->
+          :ok = @runtime_module.stop_pipeline(pipeline)
+          s
       end
 
-    camera = case NervesView.Camera.Registry.get(camera_id) do
-      {:ok, cam} -> Map.from_struct(cam)
-      _ -> nil
-    end
+    camera =
+      case NervesView.Camera.Registry.get(camera_id) do
+        {:ok, cam} -> Map.from_struct(cam)
+        _ -> nil
+      end
 
     if camera do
       case CameraPipeline.build(camera, opts) do

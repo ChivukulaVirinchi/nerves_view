@@ -15,9 +15,9 @@ defmodule NervesView.Accounts.User do
 
   @primary_key {:id, :string, autogenerate: false}
   schema "users" do
-    field :email, :string
-    field :role, Ecto.Enum, values: @roles, default: :viewer
-    field :password_hash, :string
+    field(:email, :string)
+    field(:role, Ecto.Enum, values: @roles, default: :viewer)
+    field(:password_hash, :string)
 
     timestamps(type: :utc_datetime)
   end

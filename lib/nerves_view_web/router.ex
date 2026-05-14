@@ -17,6 +17,13 @@ defmodule NervesViewWeb.Router do
     plug(:accepts, ["json"])
   end
 
+  pipeline :authenticated_api do
+    plug(:accepts, ["json"])
+    plug(:fetch_session)
+    plug(:fetch_current_user)
+    plug(:require_authenticated_api)
+  end
+
   scope "/", NervesViewWeb do
     pipe_through([:browser])
 
@@ -38,6 +45,10 @@ defmodule NervesViewWeb.Router do
     post("/webrtc/answer", WebRTCController, :answer)
     post("/webrtc/ice-candidate", WebRTCController, :ice_candidate)
     post("/webrtc/close", WebRTCController, :close)
+  end
+
+  scope "/api", NervesViewWeb do
+    pipe_through([:authenticated_api])
 
     get("/dvr/:camera_id/playlist.m3u8", DVRController, :playlist)
     get("/dvr/:camera_id/segments/:filename", DVRController, :segment)

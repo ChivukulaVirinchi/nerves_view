@@ -41,10 +41,14 @@ defmodule NervesViewWeb.SettingsLive do
 
     if changeset.valid? do
       attrs = Ecto.Changeset.apply_changes(changeset)
+      source_type = String.to_existing_atom(attrs.source_type)
 
       case NervesView.register_camera(%{
-             id: attrs.id, name: attrs.name, source_type: :libcamera,
-             status: :streaming, device_path: attrs.device_path
+             id: attrs.id,
+             name: attrs.name,
+             source_type: source_type,
+             status: :streaming,
+             device_path: attrs.device_path
            }) do
         {:ok, _} ->
           {:noreply,
@@ -117,9 +121,9 @@ defmodule NervesViewWeb.SettingsLive do
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <.input field={@cam_form[:source_type]} type="select" label="Source"
-                    options={[{"libcamera", "libcamera"}]} />
+                    options={[{"libcamera", "libcamera"}, {"rtsp", "rtsp"}]} />
                   <.input field={@cam_form[:device_path]} label="Device Path" required
-                    placeholder="/dev/video0" />
+                    placeholder="/dev/video0 or rtsp://camera/stream" />
                 </div>
                 <div><.button type="submit">Add Camera</.button></div>
               </.form>

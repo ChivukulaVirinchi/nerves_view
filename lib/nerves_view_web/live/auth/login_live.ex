@@ -33,29 +33,54 @@ defmodule NervesViewWeb.Auth.LoginLive do
       email = Ecto.Changeset.get_field(changeset, :email)
       password = Ecto.Changeset.get_field(changeset, :password)
 
-      case NervesView.login(email, password) do
-        {:ok, %{user: user}} ->
-          # Sign a short-lived token so the controller can set the session cookie
-          # without re-authenticating
-          handoff = Phoenix.Token.sign(NervesViewWeb.Endpoint, "auth_handoff", user.id)
-
-          {:noreply,
-           socket
-           |> assign(trigger_submit: true)
-           |> assign(handoff_token: handoff)
-           |> assign_form(changeset)}
-
-        {:error, _} ->
+      case rate_limit_login(email) do
+        {:error, :rate_limited} ->
           changeset =
             changeset
-            |> Ecto.Changeset.add_error(:email, "invalid email or password")
+            |> Ecto.Changeset.add_error(:email, "too many attempts; try again later")
             |> Map.put(:action, :validate)
 
           {:noreply, socket |> assign(check_errors: true) |> assign_form(changeset)}
+
+        :ok ->
+          do_login(socket, changeset, email, password)
       end
     else
-      {:noreply, socket |> assign(check_errors: true) |> assign_form(%{changeset | action: :validate})}
+      {:noreply,
+       socket |> assign(check_errors: true) |> assign_form(%{changeset | action: :validate})}
     end
+  end
+
+  defp do_login(socket, changeset, email, password) do
+    case NervesView.login(email, password) do
+      {:ok, %{user: user}} ->
+        # Sign a short-lived token so the controller can set the session cookie
+        # without re-authenticating
+        handoff = Phoenix.Token.sign(NervesViewWeb.Endpoint, "auth_handoff", user.id)
+
+        {:noreply,
+         socket
+         |> assign(trigger_submit: true)
+         |> assign(handoff_token: handoff)
+         |> assign_form(changeset)}
+
+      {:error, _} ->
+        changeset =
+          changeset
+          |> Ecto.Changeset.add_error(:email, "invalid email or password")
+          |> Map.put(:action, :validate)
+
+        {:noreply, socket |> assign(check_errors: true) |> assign_form(changeset)}
+    end
+  end
+
+  defp rate_limit_login(email) do
+    normalized = email |> String.trim() |> String.downcase()
+
+    NervesView.Security.RateLimiter.check("auth:login:#{normalized}",
+      max_attempts: 8,
+      window_seconds: 300
+    )
   end
 
   @impl true

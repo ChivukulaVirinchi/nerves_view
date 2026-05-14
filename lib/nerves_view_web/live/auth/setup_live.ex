@@ -58,7 +58,8 @@ defmodule NervesViewWeb.Auth.SetupLive do
           {:noreply, socket |> assign(check_errors: true) |> assign_form(changeset)}
       end
     else
-      {:noreply, socket |> assign(check_errors: true) |> assign_form(%{changeset | action: :validate})}
+      {:noreply,
+       socket |> assign(check_errors: true) |> assign_form(%{changeset | action: :validate})}
     end
   end
 

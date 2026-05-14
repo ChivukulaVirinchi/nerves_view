@@ -24,7 +24,9 @@ defmodule NervesView.Pipeline.Runtime.Target do
           # Start the segment writer for continuous recording
           writer_pid =
             case SegmentWriter.start_link(camera_id: descriptor.camera_id) do
-              {:ok, pid} -> pid
+              {:ok, pid} ->
+                pid
+
               {:error, reason} ->
                 require Logger
                 Logger.warning("SegmentWriter failed to start: #{inspect(reason)}")
@@ -87,5 +89,6 @@ defmodule NervesView.Pipeline.Runtime.Target do
   def health(_), do: %{healthy: false}
 
   defp validate_source(:libcamera, _path), do: :ok
+  defp validate_source(:rtsp, "rtsp://" <> _), do: :ok
   defp validate_source(_, _path), do: {:error, :invalid_source}
 end

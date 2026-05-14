@@ -22,12 +22,13 @@ defmodule NervesView.Pipeline.Camera do
          encoder: %{codec: :h264, mode: :hardware_preferred, bitrate: bitrate, keyint: fps * 2},
          outputs: %{webrtc: true, motion_detector: true},
          stream: %{resolution: resolution, fps: fps},
-         color_config: Keyword.get_lazy(opts, :color_config, fn ->
-           case NervesView.Camera.Registry.get_config(normalized.id) do
-             {:ok, config} -> config
-             _ -> %NervesView.Camera.Config{}
-           end
-         end)
+         color_config:
+           Keyword.get_lazy(opts, :color_config, fn ->
+             case NervesView.Camera.Registry.get_config(normalized.id) do
+               {:ok, config} -> config
+               _ -> %NervesView.Camera.Config{}
+             end
+           end)
        }}
     end
   end

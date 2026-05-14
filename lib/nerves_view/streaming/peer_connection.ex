@@ -26,6 +26,7 @@ defmodule NervesView.Streaming.PeerConnection do
   end
 
   def set_offer(session_id, sdp), do: GenServer.call(via(session_id), {:set_offer, sdp})
+
   def set_answer(session_id, sdp, opts \\ []),
     do: GenServer.call(via(session_id), {:set_answer, sdp, opts})
 
@@ -48,11 +49,16 @@ defmodule NervesView.Streaming.PeerConnection do
   @impl true
   def init(opts) do
     now = System.system_time(:second)
+
     ice_servers =
       Application.get_env(:nerves_view, :ice_servers, [%{urls: "stun:stun.l.google.com:19302"}])
 
     {:ok, pc} =
-      WebRTCPeer.start(controlling_process: self(), video_codecs: [:h264], ice_servers: ice_servers)
+      WebRTCPeer.start(
+        controlling_process: self(),
+        video_codecs: [:h264],
+        ice_servers: ice_servers
+      )
 
     state = %{
       session_id: Keyword.fetch!(opts, :session_id),
@@ -176,9 +182,14 @@ defmodule NervesView.Streaming.PeerConnection do
     # browser's real IP so ExICE can reach it without mDNS resolution.
     sdp = resolve_mdns_in_sdp(sdp, Keyword.get(opts, :remote_ip))
 
-    candidates = sdp |> String.split("\r\n") |> Enum.filter(&String.starts_with?(&1, "a=candidate"))
+    candidates =
+      sdp |> String.split("\r\n") |> Enum.filter(&String.starts_with?(&1, "a=candidate"))
+
     Logger.info("WebRTC answer has #{length(candidates)} candidates: #{inspect(candidates)}")
-    result = WebRTCPeer.set_remote_description(state.pc, %SessionDescription{type: :answer, sdp: sdp})
+
+    result =
+      WebRTCPeer.set_remote_description(state.pc, %SessionDescription{type: :answer, sdp: sdp})
+
     Logger.info("WebRTC set_answer result: #{inspect(result)}")
     now = System.system_time(:second)
 
@@ -481,12 +492,18 @@ defmodule NervesView.Streaming.PeerConnection do
             true
 
           # Keep lines for the preferred payload type
-          String.starts_with?(line, "a=rtpmap:#{preferred_pt} ") -> true
-          String.starts_with?(line, "a=rtcp-fb:#{preferred_pt} ") -> true
-          String.starts_with?(line, "a=fmtp:#{preferred_pt} ") -> true
+          String.starts_with?(line, "a=rtpmap:#{preferred_pt} ") ->
+            true
+
+          String.starts_with?(line, "a=rtcp-fb:#{preferred_pt} ") ->
+            true
+
+          String.starts_with?(line, "a=fmtp:#{preferred_pt} ") ->
+            true
 
           # Drop everything else
-          true -> false
+          true ->
+            false
         end
       end)
       |> Enum.join("\r\n")

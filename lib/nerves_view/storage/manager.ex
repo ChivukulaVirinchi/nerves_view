@@ -84,7 +84,11 @@ defmodule NervesView.Storage.Manager do
     case disk_usage() do
       {:ok, %{used_ratio: ratio}} when ratio >= @critical_threshold ->
         pct = trunc(ratio * 100)
-        Logger.error("Recording disk #{pct}% full — trimming to #{@critical_keep_count} recordings")
+
+        Logger.error(
+          "Recording disk #{pct}% full — trimming to #{@critical_keep_count} recordings"
+        )
+
         _ = enforce_retention(max_count: @critical_keep_count)
 
       {:ok, %{used_ratio: ratio}} when ratio >= @warn_threshold ->

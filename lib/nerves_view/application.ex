@@ -115,7 +115,9 @@ defmodule NervesView.Application do
 
   defp await_camera_sensor(attempts) do
     case safe_cmd("libcamera-vid", ["--list-cameras"]) do
-      {output, 0} when output != "No cameras available!\n" -> :ok
+      {output, 0} when output != "No cameras available!\n" ->
+        :ok
+
       _ ->
         Process.sleep(500)
         await_camera_sensor(attempts - 1)
@@ -153,8 +155,12 @@ defmodule NervesView.Application do
 
   defp ensure_repo_dir! do
     case Application.get_env(:nerves_view, NervesView.Repo)[:database] do
-      nil -> :ok
-      path -> File.mkdir_p!(Path.dirname(path)); :ok
+      nil ->
+        :ok
+
+      path ->
+        File.mkdir_p!(Path.dirname(path))
+        :ok
     end
   end
 

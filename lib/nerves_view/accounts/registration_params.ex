@@ -6,8 +6,8 @@ defmodule NervesView.Accounts.RegistrationParams do
 
   @primary_key false
   embedded_schema do
-    field :email, :string, default: ""
-    field :password, :string, default: ""
+    field(:email, :string, default: "")
+    field(:password, :string, default: "")
   end
 
   @spec changeset(map()) :: Ecto.Changeset.t()

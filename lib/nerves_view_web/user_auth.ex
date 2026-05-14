@@ -27,6 +27,17 @@ defmodule NervesViewWeb.UserAuth do
     end
   end
 
+  def require_authenticated_api(conn, _opts) do
+    if conn.assigns[:current_user] do
+      conn
+    else
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(:unauthorized, Jason.encode!(%{error: "unauthenticated"}))
+      |> halt()
+    end
+  end
+
   def redirect_if_user_is_authenticated(conn, _opts) do
     if conn.assigns[:current_user] do
       conn

@@ -271,10 +271,12 @@ defmodule NervesView.DVR.SegmentIndex do
           [_, ts_str] = Regex.run(~r/^seg-(\d+)\.ts$/, filename)
           started_at = String.to_integer(ts_str)
           path = Path.join(dir, filename)
-          size = case File.stat(path) do
-            {:ok, %{size: s}} -> s
-            _ -> 0
-          end
+
+          size =
+            case File.stat(path) do
+              {:ok, %{size: s}} -> s
+              _ -> 0
+            end
 
           %{
             started_at: started_at,

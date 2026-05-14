@@ -24,6 +24,10 @@ erl_crash.dump
 *.fw
 *.img
 
+# Local device/network secrets
+.env.nerves.local
+.nerves.env
+
 # Editor / OS
 .DS_Store
 *.swp

@@ -41,6 +41,7 @@ defmodule NervesView.Camera.Config do
   @spec from_opts(keyword()) :: t()
   def from_opts(opts) do
     awb = Keyword.get(opts, :awb, :auto)
+
     %__MODULE__{
       awb_mode: cast_awb(awb),
       saturation: Keyword.get(opts, :saturation, 1.0),

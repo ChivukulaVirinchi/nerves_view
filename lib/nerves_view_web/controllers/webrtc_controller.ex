@@ -2,6 +2,7 @@ defmodule NervesViewWeb.WebRTCController do
   use NervesViewWeb, :controller
 
   alias NervesView.Camera.Registry
+  alias NervesView.Security.RateLimiter
   alias NervesView.Streaming.Signaling
 
   # Token valid for 24 hours (browser reconnects use the same token from the LiveView mount)
@@ -15,12 +16,16 @@ defmodule NervesViewWeb.WebRTCController do
       }) do
     remote_ip = conn.remote_ip |> :inet.ntoa() |> to_string()
 
-    with {:ok, _user_id} <- verify_stream_token(token),
+    with :ok <- rate_limit(conn, "offer", max_attempts: 30, window_seconds: 60),
+         {:ok, _user_id} <- verify_stream_token(token),
          {:ok, _camera} <- Registry.get(camera_id),
          {:ok, session_id, answer_sdp} <-
            Signaling.handle_offer(camera_id, viewer_id, offer_sdp, remote_ip: remote_ip) do
       json(conn, %{session_id: session_id, answer_sdp: answer_sdp})
     else
+      {:error, :rate_limited} ->
+        rate_limited(conn)
+
       {:error, :invalid_token} ->
         conn
         |> put_status(:unauthorized)
@@ -66,15 +71,30 @@ defmodule NervesViewWeb.WebRTCController do
     |> json(%{error: "session_id_and_answer_sdp_required"})
   end
 
-  def ice_candidate(conn, %{"session_id" => session_id, "role" => role, "candidate" => candidate}) do
+  def ice_candidate(conn, %{
+        "session_id" => session_id,
+        "role" => role,
+        "candidate" => candidate,
+        "token" => token
+      }) do
     # Replace mDNS hostnames (*.local) with the browser's real IP so ExICE
     # can reach it without mDNS resolution.
     candidate = resolve_mdns_candidate(candidate, conn.remote_ip)
 
-    with {:ok, role_atom} <- parse_role(role),
+    with :ok <- rate_limit(conn, "ice", max_attempts: 240, window_seconds: 60),
+         {:ok, _user_id} <- verify_stream_token(token),
+         {:ok, role_atom} <- parse_role(role),
          :ok <- Signaling.add_ice_candidate(session_id, role_atom, candidate) do
       json(conn, %{ok: true})
     else
+      {:error, :rate_limited} ->
+        rate_limited(conn)
+
+      {:error, :invalid_token} ->
+        conn
+        |> put_status(:unauthorized)
+        |> json(%{error: "invalid_or_expired_token"})
+
       {:error, :invalid_role} ->
         conn
         |> put_status(:unprocessable_entity)
@@ -93,9 +113,20 @@ defmodule NervesViewWeb.WebRTCController do
     |> json(%{error: "session_id_role_candidate_required"})
   end
 
-  def close(conn, %{"session_id" => session_id}) do
-    _ = Signaling.close_session(session_id, :client_closed)
-    json(conn, %{ok: true})
+  def close(conn, %{"session_id" => session_id, "token" => token}) do
+    with :ok <- rate_limit(conn, "close", max_attempts: 120, window_seconds: 60),
+         {:ok, _user_id} <- verify_stream_token(token) do
+      _ = Signaling.close_session(session_id, :client_closed)
+      json(conn, %{ok: true})
+    else
+      {:error, :rate_limited} ->
+        rate_limited(conn)
+
+      {:error, :invalid_token} ->
+        conn
+        |> put_status(:unauthorized)
+        |> json(%{error: "invalid_or_expired_token"})
+    end
   end
 
   def close(conn, _params) do
@@ -134,4 +165,15 @@ defmodule NervesViewWeb.WebRTCController do
   end
 
   defp verify_stream_token(_), do: {:error, :invalid_token}
+
+  defp rate_limit(conn, bucket, opts) do
+    key = "webrtc:#{bucket}:#{conn.remote_ip |> :inet.ntoa() |> to_string()}"
+    RateLimiter.check(key, opts)
+  end
+
+  defp rate_limited(conn) do
+    conn
+    |> put_status(:too_many_requests)
+    |> json(%{error: "rate_limited"})
+  end
 end

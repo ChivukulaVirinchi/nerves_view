@@ -41,7 +41,9 @@ defmodule NervesViewWeb.DashboardLive do
 
   def handle_info({:ex_webrtc, _, _} = msg, socket), do: handle_webrtc_info(msg, socket)
   def handle_info({:pipeline_frame, _, _} = msg, socket), do: handle_webrtc_info(msg, socket)
-  def handle_info({:webrtc_negotiated, _, _, _, _} = msg, socket), do: handle_webrtc_info(msg, socket)
+
+  def handle_info({:webrtc_negotiated, _, _, _, _} = msg, socket),
+    do: handle_webrtc_info(msg, socket)
 
   @impl true
   def handle_event("webrtc:" <> _ = event, params, socket),
@@ -156,5 +158,4 @@ defmodule NervesViewWeb.DashboardLive do
 
   defp diag_map, do: NervesView.camera_diagnostics() |> Map.new(&{&1.camera_id, &1})
   defp n_healthy(d), do: d |> Map.values() |> Enum.count(& &1.healthy)
-
 end

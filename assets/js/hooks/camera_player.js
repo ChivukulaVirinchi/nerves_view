@@ -145,6 +145,7 @@ const CameraPlayer = {
       body: JSON.stringify({
         session_id: this.webrtc.sessionId,
         role: "viewer",
+        token: this.el.dataset.streamToken,
         candidate,
       }),
     })
@@ -166,7 +167,7 @@ const CameraPlayer = {
     const oldSessionId = this.webrtc.sessionId
 
     if (oldSessionId) {
-      this.closeSession(oldSessionId)
+      this.closeSession(oldSessionId, this.el.dataset.streamToken)
     }
 
     if (this.webrtc.pc) {
@@ -178,12 +179,12 @@ const CameraPlayer = {
     this.webrtc.pendingIce = []
   },
 
-  async closeSession(sessionId) {
+  async closeSession(sessionId, token) {
     try {
       await fetch("/api/webrtc/close", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId }),
+        body: JSON.stringify({ session_id: sessionId, token }),
       })
     } catch (_) {
       // Best-effort cleanup
@@ -195,6 +196,7 @@ const CameraPlayer = {
   switchToHLS(url, startOffset = 0) {
     this.mode = "playback"
     this.teardownWebRTC()
+    this.teardownHLS()
     this.el.srcObject = null
 
     if (window.Hls && window.Hls.isSupported()) {
@@ -202,16 +204,18 @@ const CameraPlayer = {
       this.hls.loadSource(url)
       this.hls.attachMedia(this.el)
       this.hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
-        this.el.play().catch(() => {})
         if (startOffset > 0) {
           this.el.currentTime = startOffset
         }
+        this.el.play().catch(() => {})
       })
     } else if (this.el.canPlayType("application/vnd.apple.mpegurl")) {
       this.el.src = url
-      this.el.play().catch(() => {})
-      if (startOffset > 0) {
-        this.el.currentTime = startOffset
+      this.el.onloadedmetadata = () => {
+        if (startOffset > 0) {
+          this.el.currentTime = startOffset
+        }
+        this.el.play().catch(() => {})
       }
     }
 
@@ -265,6 +269,7 @@ const CameraPlayer = {
       this.hls.destroy()
       this.hls = null
     }
+    this.el.onloadedmetadata = null
     this.el.removeAttribute("src")
     this.el.srcObject = null
   },

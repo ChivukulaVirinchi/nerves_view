@@ -34,7 +34,10 @@ defmodule NervesViewWeb.Auth.RegisterLive do
   end
 
   defp valid_invite?(nil), do: false
-  defp valid_invite?(token) when is_binary(token), do: NervesView.validate_invite_token(token) == :ok
+
+  defp valid_invite?(token) when is_binary(token),
+    do: NervesView.validate_invite_token(token) == :ok
+
   defp valid_invite?(_), do: false
 
   @impl true
@@ -59,7 +62,16 @@ defmodule NervesViewWeb.Auth.RegisterLive do
          |> redirect(to: ~p"/login")}
 
       not changeset.valid? ->
-        {:noreply, socket |> assign(check_errors: true) |> assign_form(%{changeset | action: :validate})}
+        {:noreply,
+         socket |> assign(check_errors: true) |> assign_form(%{changeset | action: :validate})}
+
+      rate_limit_register(Ecto.Changeset.get_field(changeset, :email)) == {:error, :rate_limited} ->
+        changeset =
+          changeset
+          |> Ecto.Changeset.add_error(:email, "too many attempts; try again later")
+          |> Map.put(:action, :validate)
+
+        {:noreply, socket |> assign(check_errors: true) |> assign_form(changeset)}
 
       true ->
         finish_submit(socket, changeset)
@@ -150,5 +162,14 @@ defmodule NervesViewWeb.Auth.RegisterLive do
 
   defp assign_form(socket, changeset) do
     assign(socket, :form, to_form(changeset, as: "user"))
+  end
+
+  defp rate_limit_register(email) do
+    normalized = email |> String.trim() |> String.downcase()
+
+    NervesView.Security.RateLimiter.check("auth:register:#{normalized}",
+      max_attempts: 5,
+      window_seconds: 300
+    )
   end
 end

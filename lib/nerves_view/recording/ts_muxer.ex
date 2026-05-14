@@ -62,15 +62,22 @@ defmodule NervesView.Recording.TsMuxer do
     # Table: program_number=1 → PMT PID
     table_data = <<
       # table_id=0x00, section_syntax=1, reserved, section_length
-      0x00, 0b1011::4, 13::12,
+      0x00,
+      0b1011::4,
+      13::12,
       # transport_stream_id
       0x0001::16,
       # reserved, version=0, current_next=1
-      0b11::2, 0::5, 1::1,
+      0b11::2,
+      0::5,
+      1::1,
       # section_number, last_section_number
-      0::8, 0::8,
+      0::8,
+      0::8,
       # program_number=1, reserved, PMT PID
-      0x0001::16, 0b111::3, @pmt_pid::13
+      0x0001::16,
+      0b111::3,
+      @pmt_pid::13
     >>
 
     crc = crc32_mpeg(table_data)
@@ -83,19 +90,30 @@ defmodule NervesView.Recording.TsMuxer do
   defp build_pmt(cc) do
     table_data = <<
       # table_id=0x02, section_syntax=1, reserved, section_length
-      0x02, 0b1011::4, 18::12,
+      0x02,
+      0b1011::4,
+      18::12,
       # program_number=1
       0x0001::16,
       # reserved, version=0, current_next=1
-      0b11::2, 0::5, 1::1,
+      0b11::2,
+      0::5,
+      1::1,
       # section_number, last_section_number
-      0::8, 0::8,
+      0::8,
+      0::8,
       # reserved, PCR PID = video PID
-      0b111::3, @video_pid::13,
+      0b111::3,
+      @video_pid::13,
       # reserved, program_info_length=0
-      0b1111::4, 0::12,
+      0b1111::4,
+      0::12,
       # stream: type=H.264, reserved, elementary PID, reserved, ES info length=0
-      @stream_type_h264::8, 0b111::3, @video_pid::13, 0b1111::4, 0::12
+      @stream_type_h264::8,
+      0b111::3,
+      @video_pid::13,
+      0b1111::4,
+      0::12
     >>
 
     crc = crc32_mpeg(table_data)
@@ -122,10 +140,19 @@ defmodule NervesView.Recording.TsMuxer do
     # PTS/DTS flags = 10 (PTS only), no ESCR, no ES rate, no DSM, no additional copy info, no CRC, no extension
     # PES header data length = 5 (PTS only)
     <<
-      0x00, 0x00, 0x01, 0xE0,
+      0x00,
+      0x00,
+      0x01,
+      0xE0,
       0x0000::16,
-      0b10::2, 0::2, 0::1, 0::1, 0::1, 0::1,
-      0b10::2, 0::6,
+      0b10::2,
+      0::2,
+      0::1,
+      0::1,
+      0::1,
+      0::1,
+      0b10::2,
+      0::6,
       5::8,
       pts_bytes::binary-size(5),
       payload::binary
@@ -195,8 +222,13 @@ defmodule NervesView.Recording.TsMuxer do
   defp ts_header(pid, afc, cc, pusi) do
     <<
       @sync_byte::8,
-      0::1, pusi::1, 0::1, pid::13,
-      0::2, afc::2, rem(cc, 16)::4
+      0::1,
+      pusi::1,
+      0::1,
+      pid::13,
+      0::2,
+      afc::2,
+      rem(cc, 16)::4
     >>
   end
 
@@ -252,18 +284,16 @@ defmodule NervesView.Recording.TsMuxer do
   # MPEG-2 uses a standard CRC-32 with polynomial 0x04C11DB7.
   # We use a lookup table for performance.
 
-  @crc_table (
-    for i <- 0..255 do
-      Enum.reduce(0..7, i <<< 24, fn _bit, crc ->
-        if (crc &&& 0x80000000) != 0 do
-          bxor(crc <<< 1, 0x04C11DB7) &&& 0xFFFFFFFF
-        else
-          (crc <<< 1) &&& 0xFFFFFFFF
-        end
-      end)
-    end
-    |> List.to_tuple()
-  )
+  @crc_table (for i <- 0..255 do
+                Enum.reduce(0..7, i <<< 24, fn _bit, crc ->
+                  if (crc &&& 0x80000000) != 0 do
+                    bxor(crc <<< 1, 0x04C11DB7) &&& 0xFFFFFFFF
+                  else
+                    crc <<< 1 &&& 0xFFFFFFFF
+                  end
+                end)
+              end)
+             |> List.to_tuple()
 
   defp crc32_mpeg(data) do
     data
