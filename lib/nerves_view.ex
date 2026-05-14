@@ -252,6 +252,16 @@ defmodule NervesView do
     StorageManager.usage()
   end
 
+  @spec recording_file_usage() :: {:ok, map()} | {:error, term()}
+  def recording_file_usage do
+    StorageManager.recording_file_usage()
+  end
+
+  @spec recording_disk_usage() :: {:ok, map()} | {:error, term()}
+  def recording_disk_usage do
+    StorageManager.disk_usage()
+  end
+
   @spec enforce_recording_retention(keyword()) :: %{
           trimmed: non_neg_integer(),
           max_count: pos_integer()

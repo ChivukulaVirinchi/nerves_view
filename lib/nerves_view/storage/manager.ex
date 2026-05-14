@@ -29,6 +29,12 @@ defmodule NervesView.Storage.Manager do
     GenServer.call(@name, :usage)
   end
 
+  @spec recording_file_usage() ::
+          {:ok, %{files: non_neg_integer(), bytes: non_neg_integer()}} | {:error, term()}
+  def recording_file_usage do
+    GenServer.call(@name, :recording_file_usage)
+  end
+
   @spec enforce_retention(keyword()) :: %{trimmed: non_neg_integer(), max_count: pos_integer()}
   def enforce_retention(opts \\ []) do
     GenServer.call(@name, {:enforce_retention, opts})
@@ -67,6 +73,15 @@ defmodule NervesView.Storage.Manager do
       end)
 
     {:reply, %{recording_count: length(recordings), total_bytes: total_bytes}, state}
+  end
+
+  def handle_call(:recording_file_usage, _from, state) do
+    reply =
+      with {:ok, recordings_path} <- recordings_path() do
+        {:ok, recording_dir_stats(recordings_path)}
+      end
+
+    {:reply, reply, state}
   end
 
   def handle_call({:enforce_retention, opts}, _from, state) do

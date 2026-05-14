@@ -27,5 +27,7 @@ defmodule NervesViewWeb.SettingsLiveTest do
     assert html =~ "Add Camera"
     assert html =~ "camera[source_type]"
     assert html =~ "Diagnostics"
+    assert html =~ "Recording Storage"
+    assert html =~ "Clear all recordings"
   end
 end

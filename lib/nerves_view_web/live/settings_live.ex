@@ -14,6 +14,7 @@ defmodule NervesViewWeb.SettingsLive do
      |> assign(page_title: "Settings")
      |> assign(cameras: NervesView.list_cameras())
      |> assign(diagnostics: NervesView.camera_diagnostics())
+     |> assign(storage: storage_info())
      |> assign_cam_form(changeset)
      |> assign(node_info: node_info())
      |> assign(invite_url: nil)}
@@ -103,6 +104,7 @@ defmodule NervesViewWeb.SettingsLive do
           {:noreply,
            socket
            |> put_flash(:info, "Deleted #{files} recording files (#{format_bytes(bytes)}).")
+           |> assign(storage: storage_info())
            |> assign(diagnostics: NervesView.camera_diagnostics())}
 
         {:error, reason} ->
@@ -222,6 +224,32 @@ defmodule NervesViewWeb.SettingsLive do
           </.card>
 
           <.card class="mt-4">
+            <:header><h3 class="font-display font-semibold text-sm">Recording Storage</h3></:header>
+            <:content>
+              <div class="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <p class="stat-num">{format_bytes(@storage.recordings.bytes)}</p>
+                  <p class="stat-lbl">Recording files</p>
+                </div>
+                <div>
+                  <p class="stat-num">{@storage.recordings.files}</p>
+                  <p class="stat-lbl">Files</p>
+                </div>
+                <div>
+                  <p class={"stat-num #{disk_pressure_class(@storage.disk.used_ratio)}"}>
+                    {format_percent(@storage.disk.used_ratio)}
+                  </p>
+                  <p class="stat-lbl">Disk used</p>
+                </div>
+              </div>
+              <div class="kv mt-3">
+                <span class="kv-k">Mount</span><span>{@storage.disk.mount}</span>
+                <span class="kv-k">Status</span><span>{@storage.disk.status}</span>
+              </div>
+            </:content>
+          </.card>
+
+          <.card class="mt-4">
             <:header><h3 class="font-display font-semibold text-sm">Node Details</h3></:header>
             <:content>
               <div class="kv">
@@ -317,6 +345,36 @@ defmodule NervesViewWeb.SettingsLive do
       otp_apps: length(Application.started_applications())
     }
   end
+
+  defp storage_info do
+    recordings =
+      case NervesView.recording_file_usage() do
+        {:ok, stats} -> stats
+        {:error, _reason} -> %{files: 0, bytes: 0}
+      end
+
+    disk =
+      case NervesView.recording_disk_usage() do
+        {:ok, %{used_ratio: ratio, mount: mount}} ->
+          %{used_ratio: ratio, mount: mount, status: disk_status(ratio)}
+
+        {:error, reason} ->
+          %{used_ratio: nil, mount: "—", status: inspect(reason)}
+      end
+
+    %{recordings: recordings, disk: disk}
+  end
+
+  defp disk_status(ratio) when is_number(ratio) and ratio >= 0.95, do: "Critical"
+  defp disk_status(ratio) when is_number(ratio) and ratio >= 0.90, do: "High"
+  defp disk_status(_ratio), do: "OK"
+
+  defp disk_pressure_class(ratio) when is_number(ratio) and ratio >= 0.95, do: "text-destructive"
+  defp disk_pressure_class(ratio) when is_number(ratio) and ratio >= 0.90, do: "text-amber-600"
+  defp disk_pressure_class(_ratio), do: ""
+
+  defp format_percent(nil), do: "—"
+  defp format_percent(ratio) when is_number(ratio), do: "#{trunc(ratio * 100)}%"
 
   defp format_bytes(bytes) when is_integer(bytes) and bytes < 1024, do: "#{bytes} B"
 

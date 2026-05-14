@@ -80,4 +80,22 @@ defmodule NervesView.Storage.ManagerTest do
     assert PlaylistManager.segments("cam-a") == []
     assert File.ls!(tmp_dir) == []
   end
+
+  test "recording_file_usage reports files from the recordings directory" do
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "nerves-view-usage-#{System.unique_integer([:positive])}")
+
+    Application.put_env(:nerves_view, :recordings_path, tmp_dir)
+
+    on_exit(fn ->
+      File.rm_rf!(tmp_dir)
+      Application.put_env(:nerves_view, :recordings_path, "tmp/recordings")
+    end)
+
+    camera_dir = Path.join(tmp_dir, "cam-a")
+    File.mkdir_p!(camera_dir)
+    File.write!(Path.join(camera_dir, "seg-100.ts"), :binary.copy(<<0x47>>, 188))
+
+    assert {:ok, %{files: 1, bytes: 188}} = Manager.recording_file_usage()
+  end
 end
