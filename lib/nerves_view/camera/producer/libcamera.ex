@@ -33,15 +33,19 @@ defmodule NervesView.Camera.Producer.Libcamera do
   @impl true
   def init(opts) do
     source_path = Keyword.get(opts, :source_path, "/dev/video0")
-    width = Keyword.get(opts, :width, 640)
-    height = Keyword.get(opts, :height, 480)
-    fps = Keyword.get(opts, :fps, 15)
     color_config = Keyword.get(opts, :color_config, %NervesView.Camera.Config{})
+
+    # Stream params live on the per-camera config so a single Apply restart
+    # picks up both WB and resolution/fps/bitrate changes in one go.
+    width = Map.get(color_config, :width, 640)
+    height = Map.get(color_config, :height, 480)
+    fps = Map.get(color_config, :fps, 10)
+    bitrate = Map.get(color_config, :bitrate, 600_000)
 
     kill_orphaned_libcamera_vid()
 
     with {:ok, exec} <- find_libcamera_vid(),
-         {:ok, port} <- open_port(exec, width, height, fps, color_config) do
+         {:ok, port} <- open_port(exec, width, height, fps, bitrate, color_config) do
       now = System.system_time(:second)
       Process.send_after(self(), :tick, @tick_ms)
 
@@ -64,7 +68,8 @@ defmodule NervesView.Camera.Producer.Libcamera do
          color_config: color_config,
          width: width,
          height: height,
-         fps: fps
+         fps: fps,
+         bitrate: bitrate
        }}
     else
       {:error, reason} -> {:stop, reason}
@@ -149,10 +154,11 @@ defmodule NervesView.Camera.Producer.Libcamera do
   def handle_info(:restart_port, state) do
     w = Map.get(state, :width, 640)
     h = Map.get(state, :height, 480)
-    fps = Map.get(state, :fps, 15)
+    fps = Map.get(state, :fps, 10)
+    bitrate = Map.get(state, :bitrate, 600_000)
     color_config = Map.get(state, :color_config, %NervesView.Camera.Config{})
 
-    case open_port(state.exec, w, h, fps, color_config) do
+    case open_port(state.exec, w, h, fps, bitrate, color_config) do
       {:ok, new_port} ->
         Logger.info("libcamera-vid restarted successfully")
         {:noreply, %{state | port: new_port, buffer: <<>>, healthy: true, last_error: nil}}
@@ -274,7 +280,7 @@ defmodule NervesView.Camera.Producer.Libcamera do
     end
   end
 
-  defp open_port(exec, width, height, fps, color_config) do
+  defp open_port(exec, width, height, fps, bitrate, color_config) do
     awb = Map.get(color_config, :awb_mode, :auto) |> Atom.to_string()
     exposure = Map.get(color_config, :exposure_mode, :normal) |> Atom.to_string()
     saturation = Map.get(color_config, :saturation, 1.0) |> Float.to_string()
@@ -303,6 +309,8 @@ defmodule NervesView.Camera.Producer.Libcamera do
       sharpness,
       "--denoise",
       "cdn_fast",
+      "--bitrate",
+      to_string(bitrate),
       "--intra",
       to_string(fps),
       "--framerate",

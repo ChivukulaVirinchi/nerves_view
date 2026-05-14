@@ -23,6 +23,9 @@ defmodule NervesView.Pipeline.Runtime.FramePublisher do
     source_path = Keyword.get(opts, :source_path, "synthetic://pattern")
     color_config = Keyword.get(opts, :color_config)
 
+    # The producer reads width/height/fps/bitrate off the per-camera config
+    # struct (see NervesView.Camera.Config). Pass it through; the producer
+    # falls back to the struct's own defaults if absent.
     producer_opts =
       [source_type: source_type, source_path: source_path]
       |> then(fn base ->

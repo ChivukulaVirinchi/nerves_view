@@ -38,7 +38,10 @@ defmodule NervesView.Pipeline.Camera do
     if @is_host do
       {1280, 720, 30, 2_000_000}
     else
-      {640, 480, 15, 800_000}
+      # Pi Zero 2 W default — matches Camera.Config defaults. The producer
+      # pulls real values off the per-camera config; these are only used by
+      # the descriptor's metadata fields.
+      {640, 480, 10, 600_000}
     end
   end
 end

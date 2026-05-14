@@ -58,8 +58,8 @@ defmodule NervesViewWeb.CameraLive do
     diag = get_diag(cam_id)
     retention = NervesView.dvr_retention_window(cam_id)
 
-    {oldest, newest} =
-      scrubber_bounds(socket.assigns.scrubber_day, retention, socket.assigns.tz_offset)
+    bounds = scrubber_bounds(socket.assigns.scrubber_day, retention, socket.assigns.tz_offset)
+    {oldest, newest} = {bounds.oldest, bounds.newest}
 
     alerts = NervesView.Alerts.list(camera_id: cam_id, since: oldest)
 
@@ -73,11 +73,7 @@ defmodule NervesViewWeb.CameraLive do
      |> assign(diag: diag)
      |> assign(retention: retention)
      |> push_event("dvr:markers", %{markers: markers, append: false})
-     |> push_event("dvr:bounds", %{
-       server_time: System.system_time(:second),
-       oldest: oldest,
-       newest: newest
-     })}
+     |> push_event("dvr:bounds", bounds_payload(bounds))}
   end
 
   def handle_info({:motion_alert, alert}, socket) do
@@ -102,16 +98,12 @@ defmodule NervesViewWeb.CameraLive do
   @impl true
   def handle_event("tz:offset", %{"offset_minutes" => offset}, socket) do
     off = ensure_int(offset)
-    {oldest, newest} = scrubber_bounds(socket.assigns.scrubber_day, socket.assigns.retention, off)
+    bounds = scrubber_bounds(socket.assigns.scrubber_day, socket.assigns.retention, off)
 
     {:noreply,
      socket
      |> assign(tz_offset: off)
-     |> push_event("dvr:bounds", %{
-       server_time: System.system_time(:second),
-       oldest: oldest,
-       newest: newest
-     })}
+     |> push_event("dvr:bounds", bounds_payload(bounds))}
   end
 
   def handle_event("webrtc:" <> _ = event, params, socket),
@@ -191,18 +183,13 @@ defmodule NervesViewWeb.CameraLive do
   def handle_event("dvr:set_day", %{"day" => day_iso}, socket) do
     case Date.from_iso8601(day_iso) do
       {:ok, day} ->
-        {oldest, newest} =
-          scrubber_bounds(day, socket.assigns.retention, socket.assigns.tz_offset)
+        bounds = scrubber_bounds(day, socket.assigns.retention, socket.assigns.tz_offset)
 
         {:noreply,
          socket
          |> assign(scrubber_day: day)
          |> assign(scrubber_day_iso: day_iso)
-         |> push_event("dvr:bounds", %{
-           server_time: System.system_time(:second),
-           oldest: oldest,
-           newest: newest
-         })}
+         |> push_event("dvr:bounds", bounds_payload(bounds))}
 
       _ ->
         {:noreply, socket}
@@ -214,24 +201,28 @@ defmodule NervesViewWeb.CameraLive do
   end
 
   def handle_event("update_color", params, socket) do
+    current = socket.assigns.color_config
+
     awb =
       parse_known_atom(
         params["awb_mode"],
         ~w(auto indoor daylight cloudy fluorescent tungsten incandescent),
-        :auto
+        current.awb_mode
       )
 
-    sat = params["saturation"] || "1.0"
-    con = params["contrast"] || "1.0"
-    sharp = params["sharpness"] || "1.0"
-    exp = parse_known_atom(params["exposure_mode"], ~w(normal short long), :normal)
+    exp = parse_known_atom(params["exposure_mode"], ~w(normal short long), current.exposure_mode)
+    {w, h} = parse_resolution(params["resolution"], {current.width, current.height})
 
     new_config = %NervesView.Camera.Config{
       awb_mode: awb,
-      saturation: parse_param_float(sat, 1.0),
-      contrast: parse_param_float(con, 1.0),
-      sharpness: parse_param_float(sharp, 1.0),
-      exposure_mode: exp
+      saturation: parse_param_float(params["saturation"], current.saturation),
+      contrast: parse_param_float(params["contrast"], current.contrast),
+      sharpness: parse_param_float(params["sharpness"], current.sharpness),
+      exposure_mode: exp,
+      width: w,
+      height: h,
+      fps: parse_param_int(params["fps"], current.fps, 1, 30),
+      bitrate: parse_param_int(params["bitrate"], current.bitrate, 100_000, 4_000_000)
     }
 
     {:noreply, assign(socket, color_config: new_config)}
@@ -243,22 +234,26 @@ defmodule NervesViewWeb.CameraLive do
 
     with :ok <- NervesView.set_camera_color_config(cam_id, Map.from_struct(config)),
          {:ok, _} <- NervesView.restart_camera_pipeline(cam_id) do
+      # The restarted pipeline resets the RTP sequence/timestamp to 0.
+      # Existing WebRTC peers see a seq jump backward and stall — tell the
+      # browser to drop the old peer and renegotiate from scratch.
       {:noreply,
        socket
        |> assign(show_color_popover: false)
-       |> put_flash(:info, "Color settings applied — pipeline restarted.")}
+       |> push_event("webrtc:reconnect", %{})
+       |> put_flash(:info, "Settings applied — reconnecting stream.")}
     else
       {:error, reason} ->
         {:noreply,
          socket
          |> assign(show_color_popover: false)
-         |> put_flash(:error, "Color settings failed: #{inspect(reason)}")}
+         |> put_flash(:error, "Settings failed: #{inspect(reason)}")}
 
       reason ->
         {:noreply,
          socket
          |> assign(show_color_popover: false)
-         |> put_flash(:error, "Color settings failed: #{inspect(reason)}")}
+         |> put_flash(:error, "Settings failed: #{inspect(reason)}")}
     end
   end
 
@@ -282,7 +277,7 @@ defmodule NervesViewWeb.CameraLive do
       </div>
 
       <% ok? = @diag && @diag.healthy %>
-      <% {tl_oldest, tl_newest} = scrubber_bounds(@scrubber_day, @retention, @tz_offset) %>
+      <% tl_bounds = scrubber_bounds(@scrubber_day, @retention, @tz_offset) %>
 
       <.card class="overflow-hidden">
         <:content class="p-0">
@@ -378,11 +373,43 @@ defmodule NervesViewWeb.CameraLive do
                   <%!-- Exposure Mode --%>
                   <label class="color-field">
                     <span class="color-field-label">Exposure</span>
-                    <select name="exposure_mode" value={Atom.to_string(@color_config.exposure_mode)} class="input input-sm w-full">
+                    <select name="exposure_mode" class="input input-sm w-full">
                       <option value="normal" selected={@color_config.exposure_mode == :normal}>Normal</option>
                       <option value="short" selected={@color_config.exposure_mode == :short}>Short (fast)</option>
                       <option value="long" selected={@color_config.exposure_mode == :long}>Long (bright)</option>
                     </select>
+                  </label>
+
+                  <div class="color-popover-divider">Stream</div>
+
+                  <%!-- Resolution --%>
+                  <label class="color-field">
+                    <span class="color-field-label">Resolution</span>
+                    <% res = "#{@color_config.width}x#{@color_config.height}" %>
+                    <select name="resolution" class="input input-sm w-full">
+                      <option value="320x240" selected={res == "320x240"}>320×240 (lightest)</option>
+                      <option value="480x360" selected={res == "480x360"}>480×360</option>
+                      <option value="640x480" selected={res == "640x480"}>640×480 (default)</option>
+                      <option value="800x600" selected={res == "800x600"}>800×600 (heavier)</option>
+                    </select>
+                  </label>
+
+                  <%!-- FPS --%>
+                  <label class="color-field">
+                    <span class="color-field-label">
+                      Frame rate <span class="color-field-val">{@color_config.fps} fps</span>
+                    </span>
+                    <input type="range" name="fps" min="5" max="20" step="1"
+                      value={@color_config.fps} class="color-slider" />
+                  </label>
+
+                  <%!-- Bitrate --%>
+                  <label class="color-field">
+                    <span class="color-field-label">
+                      Bitrate <span class="color-field-val">{div(@color_config.bitrate, 1000)} kbps</span>
+                    </span>
+                    <input type="range" name="bitrate" min="200000" max="2000000" step="50000"
+                      value={@color_config.bitrate} class="color-slider" />
                   </label>
 
                   <div class="color-popover-actions">
@@ -418,8 +445,12 @@ defmodule NervesViewWeb.CameraLive do
             phx-hook="TimelineScrubber"
             phx-update="ignore"
             data-camera-id={@camera.id}
-            data-oldest={tl_oldest}
-            data-newest={tl_newest}
+            data-oldest={tl_bounds.oldest}
+            data-newest={tl_bounds.newest}
+            data-axis-start={tl_bounds.axis_start}
+            data-axis-end={tl_bounds.axis_end}
+            data-has-recordings={if tl_bounds.has_recordings, do: "1", else: "0"}
+            data-day-label={tl_bounds.day_label || ""}
             data-server-time={System.system_time(:second)}
           />
         </:content>
@@ -473,19 +504,45 @@ defmodule NervesViewWeb.CameraLive do
     |> Enum.find(&(&1.camera_id == camera_id))
   end
 
+  # Returns a map with:
+  #   :oldest, :newest         playable window (oldest <= newest, or 0/0 when empty)
+  #   :axis_start, :axis_end   the timeline's visual axis range — always a valid span
+  #   :has_recordings          true if there's any playable region inside the axis
+  #   :day_label               ISO date being shown, or nil
   defp scrubber_bounds(day, retention, tz_offset_minutes)
 
   defp scrubber_bounds(nil, retention, _tz_offset_minutes) do
     now = System.system_time(:second)
     fallback_start = now - 24 * 3600
 
-    {ret_oldest, ret_newest} =
-      case retention do
-        {a, b} -> {a, b}
-        _ -> {fallback_start, now}
-      end
+    case retention do
+      {ret_oldest, ret_newest} when ret_newest > ret_oldest ->
+        # Axis = retention extent (so labels match real recording timestamps),
+        # capped to last 24h if retention is older than that.
+        oldest = max(fallback_start, ret_oldest)
+        newest = min(now, ret_newest)
 
-    {max(fallback_start, ret_oldest), min(now, ret_newest)}
+        %{
+          oldest: oldest,
+          newest: newest,
+          axis_start: oldest,
+          axis_end: newest,
+          has_recordings: newest > oldest,
+          day_label: nil
+        }
+
+      _ ->
+        # No recordings yet. Show the last 24h as the axis with an empty
+        # state — user gets clock context but the scrubber is non-interactive.
+        %{
+          oldest: 0,
+          newest: 0,
+          axis_start: fallback_start,
+          axis_end: now,
+          has_recordings: false,
+          day_label: nil
+        }
+    end
   end
 
   defp scrubber_bounds(day, retention, tz_offset_minutes) do
@@ -498,16 +555,55 @@ defmodule NervesViewWeb.CameraLive do
     day_start = DateTime.to_unix(day_start_utc)
     day_end = DateTime.to_unix(day_end_utc)
     now = System.system_time(:second)
+    day_label = Date.to_iso8601(day)
 
-    {ret_oldest, ret_newest} =
-      case retention do
-        {a, b} -> {a, b}
-        _ -> {day_start, now}
-      end
+    case retention do
+      {ret_oldest, ret_newest} when ret_newest > ret_oldest ->
+        oldest = max(day_start, ret_oldest)
+        newest = min(min(day_end, now), ret_newest)
 
-    oldest = max(day_start, ret_oldest)
-    newest = min(min(day_end, now), ret_newest)
-    {oldest, newest}
+        if newest > oldest do
+          %{
+            oldest: oldest,
+            newest: newest,
+            axis_start: day_start,
+            axis_end: min(day_end, now),
+            has_recordings: true,
+            day_label: day_label
+          }
+        else
+          %{
+            oldest: 0,
+            newest: 0,
+            axis_start: day_start,
+            axis_end: min(day_end, now),
+            has_recordings: false,
+            day_label: day_label
+          }
+        end
+
+      _ ->
+        %{
+          oldest: 0,
+          newest: 0,
+          axis_start: day_start,
+          axis_end: min(day_end, now),
+          has_recordings: false,
+          day_label: day_label
+        }
+    end
+  end
+
+  defp bounds_payload(bounds) do
+    %{
+      server_time: System.system_time(:second),
+      oldest: bounds.oldest,
+      newest: bounds.newest,
+      axis_start: bounds.axis_start,
+      axis_end: bounds.axis_end,
+      has_recordings: bounds.has_recordings,
+      day_label: bounds.day_label
+    }
   end
 
   defp compute_playback_base_and_offset(camera_id, from_ts) do
@@ -543,6 +639,24 @@ defmodule NervesViewWeb.CameraLive do
   end
 
   defp parse_param_float(_, default), do: default
+
+  defp parse_param_int(v, _default, lo, hi) when is_integer(v),
+    do: v |> max(lo) |> min(hi)
+
+  defp parse_param_int(v, default, lo, hi) when is_binary(v) do
+    case Integer.parse(v) do
+      {n, _} -> n |> max(lo) |> min(hi)
+      :error -> default
+    end
+  end
+
+  defp parse_param_int(_, default, _lo, _hi), do: default
+
+  defp parse_resolution("320x240", _default), do: {320, 240}
+  defp parse_resolution("480x360", _default), do: {480, 360}
+  defp parse_resolution("640x480", _default), do: {640, 480}
+  defp parse_resolution("800x600", _default), do: {800, 600}
+  defp parse_resolution(_, default), do: default
 
   defp parse_known_atom(value, allowed, default) when is_binary(value) do
     if value in allowed, do: String.to_existing_atom(value), else: default

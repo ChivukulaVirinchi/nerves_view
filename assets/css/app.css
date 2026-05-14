@@ -500,6 +500,36 @@ body::before {
   box-shadow: 0 0 8px oklch(from var(--color-ember) l c h / 0.6);
 }
 
+/* Empty-state overlay: shown when the visible day has no recordings. */
+.tl-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  background: oklch(from var(--background) l c h / 0.7);
+  pointer-events: none;
+  z-index: 5;
+  letter-spacing: 0.02em;
+}
+
+.cam-tl.empty .tl-marker { display: none; }
+
+/* Section divider inside the color/stream popover. */
+.color-popover-divider {
+  margin: 0.5rem 0 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
 /* ── Auth ── */
 
 .auth-wrap {

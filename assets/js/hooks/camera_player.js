@@ -20,6 +20,18 @@ const CameraPlayer = {
     this.handleEvent("dvr:play", ({ url, start_offset }) => this.switchToHLS(url, start_offset))
     this.handleEvent("dvr:live", () => this.switchToLive())
 
+    // Server tells us to drop the current peer and re-negotiate. Fires after
+    // a pipeline restart (e.g. apply WB/stream changes) — the new producer
+    // resets RTP seq/ts to 0, which our old peer would reject.
+    this.handleEvent("webrtc:reconnect", () => {
+      if (this.mode !== "live") return
+      this.webrtc.retries = 0
+      this.webrtc.stopped = false
+      this.teardownWebRTC()
+      // Tiny grace period so the new pipeline is up before we offer again.
+      setTimeout(() => this.startWebRTC(), 500)
+    })
+
     // Start live via WebRTC (low latency)
     this.startWebRTC()
   },
