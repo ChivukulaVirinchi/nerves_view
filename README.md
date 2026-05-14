@@ -1,89 +1,76 @@
 # NervesView
 
-Self-hosted home surveillance running on a Raspberry Pi. Phoenix LiveView UI,
-H.264 over WebRTC for live view, MPEG-TS + HLS for recording and playback,
-SQLite for auth. All in Elixir + a Nerves firmware image.
+Local NVR for Nerves devices. It captures camera input on the device, streams live video over WebRTC, and writes HLS/DVR segments for playback in the Phoenix LiveView UI.
 
-This is a personal project I open-sourced. It works for me, it might not work
-for you out of the box — expect rough edges, and please file issues when you
-hit them.
+Working name note: if you want a product name with a more distinct feel than `NervesView`, `Drishti` is the one I would pick. It is short, readable, and means sight/vision.
 
-## What you need
+## What it does
 
-- **Raspberry Pi Zero 2 W** (the only board I've tested on).
-- **Raspberry Pi Camera Module v2** (IMX219). v1 / v3 / HQ may also work — auto-detected via `camera_auto_detect=1`.
-- **22-pin 0.5 mm-pitch CSI ribbon cable** designed for the Pi Zero — the standard 15-pin Pi 4/5 cable will not fit.
-- A **high-endurance microSD card** (≥32 GB; SanDisk Max Endurance / Samsung Pro Endurance recommended for 24/7 recording).
-- Linux host with Elixir 1.19 + OTP 28 (`mise` / `asdf` configured) and the [Nerves toolchain](https://hexdocs.pm/nerves/installation.html).
+- Live view over WebRTC
+- Timeline playback over HLS
+- On-device recording to `.ts` segments
+- User auth and role-based access
+- Camera sources for `libcamera`
 
-## Build & flash
+## Build
 
 ```bash
 git clone https://github.com/ChivukulaVirinchi/nerves_view
 cd nerves_view
 mix deps.get
 MIX_ENV=prod MIX_TARGET=rpi0_2 mix firmware
-MIX_ENV=prod MIX_TARGET=rpi0_2 mix burn   # or `mix upload nervesview.local` after first boot
+MIX_ENV=prod MIX_TARGET=rpi0_2 mix burn
 ```
 
 ## First boot
 
-1. Pi boots, gets a DHCP address, and announces itself as `nervesview.local`.
-2. Open `http://nervesview.local:4000` in a browser on the same network.
-3. The first user you register becomes the admin.
-4. The default camera (`cam-local`) starts streaming immediately.
+1. Boot the Pi and let it join your network.
+2. Open `http://nervesview.local:4000` or the device IP.
+3. Register the first user. That account becomes admin.
+4. Add cameras from the Settings page.
 
-## Putting the Pi on home Wi-Fi
+## Wi-Fi on the Pi
 
-SSH in (`ssh nervesview.local`) and run from IEx:
-
-```elixir
-VintageNetWiFi.quick_configure("YourSSID", "YourPassword")
-```
-
-Settings persist to `/data/vintage_net.config` and survive reboots.
-
-## Where things live on the device
-
-| Concern | Path |
-|---|---|
-| App rootfs (read-only) | `/` |
-| Recordings (persistent) | `/data/nerves_view/recordings/<camera_id>/seg-*.ts` |
-| Accounts DB (persistent) | `/data/nerves_view/nerves_view.db` |
-| Wi-Fi config | `/data/vintage_net.config` |
-
-## Development (host)
+The target config reads Wi-Fi credentials from environment variables:
 
 ```bash
-mix test              # full suite
-mix phx.server        # Phoenix on http://localhost:4000 (no camera; synthetic source)
+export NERVES_WIFI_SSID='Tenda_0E98A0'
+export NERVES_WIFI_PSK='61338806'
 ```
 
-## Architecture in two paragraphs
+Those values are used at build time for the firmware image and are not committed to the repo.
 
-`libcamera-vid` is launched as a Port and emits an H.264 bitstream. The producer
-splits it into NALs, groups them into access units, and publishes each AU to a
-`StreamBus`. Two subscribers consume it: the **per-viewer `PeerConnection`
-GenServer** packetizes the AU into RTP (STAP-A for SPS/PPS, FU-A for the slice,
-marker bit only on the last packet) and forwards it through `ex_webrtc` to the
-browser. The **`SegmentWriter`** muxes the NALs into MPEG-TS and writes 6-second
-segments to disk; `PlaylistManager` emits an HLS m3u8 over the segments for
-DVR playback in the same UI.
+## Camera sources
 
-DTLS uses a patched `ex_dtls` ([fork](https://github.com/ChivukulaVirinchi/ex_dtls/tree/fix/openssl3-dgram-mem-bio))
-that accepts any X.509 cert during the handshake — necessary because Pi RTCs
-typically lag behind the browser's freshly-minted cert's `notBefore` at boot.
-The WebRTC trust model relies on the SDP fingerprint check that `ex_webrtc`
-already does post-handshake.
+- `libcamera`: local Pi CSI camera
 
-## Caveats
+RTSP ingest is planned, not a finished supported path yet. The intended design is
+to pull H.264 RTSP from IP cameras on the device, then keep the browser-facing
+live stream on WebRTC and the DVR path on HLS.
 
-- The SD card is the bottleneck for long-term reliability. Use a high-endurance card.
-- HTTP only by default. For external access, run Tailscale on the Pi — don't port-forward.
-- One Pi Zero 2 W can comfortably serve ~2 concurrent WebRTC viewers per camera. Beyond that, SRTP encryption becomes the bottleneck.
-- Audio is not captured.
-- Motion detection is wired conceptually (alerts + scrubber markers) but the producer side is not yet hooked up to `libcamera-vid`'s `motion_detect` post-processor.
+## Future Plan
 
-## License
+- RTSP ingest for common H.264 IP cameras
+- Better source diagnostics for auth, codec, and network failures
+- ONVIF discovery so users do not need to type RTSP URLs by hand
+- Secure camera credential storage
+- Optional support for additional camera classes beyond the local CSI path
 
-MIT. See `LICENSE`.
+## Development
+
+```bash
+MIX_TARGET=host mix test
+mix phx.server
+```
+
+## Storage
+
+- Recordings: `/data/nerves_view/recordings/<camera_id>/`
+- Database: `/data/nerves_view/nerves_view.db`
+- Persistent app state: `/data/nerves_view/persistence`
+
+## Notes
+
+- This is designed for a local appliance, not a public-facing cloud service.
+- Keep `SECRET_KEY_BASE` set in production.
+- Use a high-endurance SD card.
