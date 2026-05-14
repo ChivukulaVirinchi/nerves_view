@@ -2,7 +2,7 @@
 
 Local NVR for Nerves devices. It captures camera input on the device, streams live video over WebRTC, and writes HLS/DVR segments for playback in the Phoenix LiveView UI.
 
-Working name note: if you want a product name with a more distinct feel than `NervesView`, `Drishti` is the one I would pick. It is short, readable, and means sight/vision.
+![Demo](demo.webp)
 
 ## What it does
 
@@ -34,8 +34,8 @@ MIX_ENV=prod MIX_TARGET=rpi0_2 mix burn
 The target config reads Wi-Fi credentials from environment variables:
 
 ```bash
-export NERVES_WIFI_SSID='Tenda_0E98A0'
-export NERVES_WIFI_PSK='61338806'
+export NERVES_WIFI_SSID='WIFI_NAME'
+export NERVES_WIFI_PSK='WIFI_PASSWORD'
 ```
 
 Those values are used at build time for the firmware image and are not committed to the repo.

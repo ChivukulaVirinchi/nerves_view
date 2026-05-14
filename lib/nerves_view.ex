@@ -252,6 +252,57 @@ defmodule NervesView do
     StorageManager.usage()
   end
 
+  @doc """
+  The display timezone offset (minutes east of UTC). Set via
+  `config :nerves_view, :tz_offset_minutes, N`. Default 330 = IST.
+  Used everywhere — server-rendered timestamps, scrubber labels, date
+  filters — so there's one source of truth and no JS detection race.
+  """
+  @spec tz_offset_minutes() :: integer()
+  def tz_offset_minutes do
+    Application.get_env(:nerves_view, :tz_offset_minutes, 330)
+  end
+
+  @doc """
+  Returns the Pi's current wall-clock time plus NTP sync state, so the UI
+  can surface "your timestamps are off because the Pi clock isn't synced"
+  to the user instead of silently showing wrong values.
+  """
+  @spec system_time_info() :: %{system_time: integer(), synchronized: boolean(), source: atom()}
+  def system_time_info do
+    %{
+      system_time: System.system_time(:second),
+      synchronized: ntp_synchronized?(),
+      source: ntp_source()
+    }
+  end
+
+  defp ntp_synchronized? do
+    cond do
+      not Code.ensure_loaded?(NervesTime) -> true
+      function_exported?(NervesTime, :synchronized?, 0) ->
+        try do
+          apply(NervesTime, :synchronized?, [])
+        rescue
+          _ -> false
+        end
+      true -> true
+    end
+  end
+
+  defp ntp_source do
+    cond do
+      not Code.ensure_loaded?(NervesTime) -> :host_os
+      function_exported?(NervesTime, :cur_time_source, 0) ->
+        try do
+          apply(NervesTime, :cur_time_source, [])
+        rescue
+          _ -> :unknown
+        end
+      true -> :unknown
+    end
+  end
+
   @spec recording_file_usage() :: {:ok, map()} | {:error, term()}
   def recording_file_usage do
     StorageManager.recording_file_usage()

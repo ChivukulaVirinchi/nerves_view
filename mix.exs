@@ -28,6 +28,7 @@ defmodule NervesView.MixProject do
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
+      listeners: [Phoenix.CodeReloader],
       releases: [{@app, release()}],
       aliases: aliases()
     ]
@@ -44,6 +45,7 @@ defmodule NervesView.MixProject do
       preferred_targets: [
         run: :host,
         test: :host,
+        "phx.server": :host,
         firmware: :rpi0_2,
         upload: :rpi0_2,
         burn: :rpi0_2,
@@ -67,11 +69,12 @@ defmodule NervesView.MixProject do
       {:nerves, "~> 1.10", runtime: false},
       {:shoehorn, "~> 0.9.1"},
       {:ring_logger, "~> 0.11.0"},
+      {:logger_backends, "~> 1.0"},
       {:toolshed, "~> 0.4.0"},
 
-      # Allow Nerves.Runtime on host to support development, testing and CI.
-      # See config/host.exs for usage.
-      {:nerves_runtime, "~> 0.13.0"},
+      # Allow Nerves.Runtime modules without starting target-only runtime
+      # services during local development and tests.
+      {:nerves_runtime, "~> 0.13.0", runtime: Mix.env() == :prod and Mix.target() != :host},
       {:phoenix, "~> 1.8.5"},
       {:phoenix_html, "~> 4.1"},
       {:phoenix_live_view, "~> 1.1.27"},
@@ -89,7 +92,7 @@ defmodule NervesView.MixProject do
       {:bandit, "~> 1.5"},
       {:gettext, "~> 0.26"},
       {:bcrypt_elixir, "~> 3.0"},
-      {:ex_webrtc, "~> 0.16"},
+      {:ex_webrtc, "~> 0.16.1"},
       # Forked to make verify_cb accept any X.509 cert during the DTLS
       # handshake — Pi RTCs lag behind the browser's freshly-minted cert's
       # notBefore at boot, which the upstream verify_cb (whitelists only
@@ -105,7 +108,7 @@ defmodule NervesView.MixProject do
       {:libcluster, "~> 3.3"},
 
       # Dependencies for all targets except :host
-      {:nerves_pack, "~> 0.7.1", targets: @all_targets},
+      {:nerves_pack, "~> 0.7.1", targets: @all_targets, runtime: Mix.env() == :prod},
 
       # Dependencies for specific targets
       # NOTE: It's generally low risk and recommended to follow minor version

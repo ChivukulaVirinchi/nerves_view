@@ -7,6 +7,7 @@ defmodule NervesView.Application do
 
   @impl true
   def start(_type, _args) do
+    :ok = maybe_configure_target_logger()
     :ok = ensure_repo_dir!()
     :ok = migrate_repo!()
     :ok = maybe_bootstrap_wifi()
@@ -149,8 +150,21 @@ defmodule NervesView.Application do
   # VintageNet so the Pi can auto-join home WiFi without rebuilding firmware.
   if Mix.target() == :host do
     defp maybe_bootstrap_wifi, do: :ok
+    defp maybe_configure_target_logger, do: :ok
   else
     defp maybe_bootstrap_wifi, do: NervesView.Network.WiFiBootstrap.ensure_configured()
+
+    defp maybe_configure_target_logger do
+      if Code.ensure_loaded?(LoggerBackends) and Code.ensure_loaded?(RingLogger) do
+        case LoggerBackends.add(RingLogger) do
+          {:ok, _pid} -> :ok
+          {:error, :already_present} -> :ok
+          {:error, _reason} -> :ok
+        end
+      else
+        :ok
+      end
+    end
   end
 
   defp ensure_repo_dir! do

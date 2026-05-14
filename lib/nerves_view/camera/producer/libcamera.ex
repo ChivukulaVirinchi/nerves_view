@@ -35,12 +35,17 @@ defmodule NervesView.Camera.Producer.Libcamera do
     source_path = Keyword.get(opts, :source_path, "/dev/video0")
     color_config = Keyword.get(opts, :color_config, %NervesView.Camera.Config{})
 
-    # Stream params live on the per-camera config so a single Apply restart
-    # picks up both WB and resolution/fps/bitrate changes in one go.
-    width = Map.get(color_config, :width, 640)
-    height = Map.get(color_config, :height, 480)
-    fps = Map.get(color_config, :fps, 10)
-    bitrate = Map.get(color_config, :bitrate, 600_000)
+    width = Map.get(color_config, :width, 480)
+    height = Map.get(color_config, :height, 360)
+    fps = Map.get(color_config, :fps, 8)
+    bitrate = Map.get(color_config, :bitrate, 400_000)
+
+    # RTP video clock is fixed at 90 kHz. Per-frame ticks therefore depend on
+    # source fps. Hardcoding (the old code did 6000 = 15 fps) caused the
+    # browser decoder to drift — it expected 15 fps but got 8/10/etc. fps,
+    # so the jitter buffer underran into freeze/burst cycles. Compute it once
+    # here and reuse for every access unit.
+    ts_increment = div(90_000, fps)
 
     kill_orphaned_libcamera_vid()
 
@@ -69,7 +74,8 @@ defmodule NervesView.Camera.Producer.Libcamera do
          width: width,
          height: height,
          fps: fps,
-         bitrate: bitrate
+         bitrate: bitrate,
+         ts_increment: ts_increment
        }}
     else
       {:error, reason} -> {:stop, reason}
@@ -124,7 +130,8 @@ defmodule NervesView.Camera.Producer.Libcamera do
             state.pending_nals,
             state.au_queue,
             state.sequence,
-            state.timestamp
+            state.timestamp,
+            state.ts_increment
           )
 
         latest_nal = List.last(nal_units)
@@ -152,10 +159,10 @@ defmodule NervesView.Camera.Producer.Libcamera do
   end
 
   def handle_info(:restart_port, state) do
-    w = Map.get(state, :width, 640)
-    h = Map.get(state, :height, 480)
-    fps = Map.get(state, :fps, 10)
-    bitrate = Map.get(state, :bitrate, 600_000)
+    w = Map.get(state, :width, 480)
+    h = Map.get(state, :height, 360)
+    fps = Map.get(state, :fps, 8)
+    bitrate = Map.get(state, :bitrate, 400_000)
     color_config = Map.get(state, :color_config, %NervesView.Camera.Config{})
 
     case open_port(state.exec, w, h, fps, bitrate, color_config) do
@@ -181,14 +188,14 @@ defmodule NervesView.Camera.Producer.Libcamera do
   # Walk NALs in order, grouping into access units. Non-VCL NALs (types 6/7/8/9
   # — SEI/SPS/PPS/AUD) accumulate as pending parameter sets, then the next VCL
   # NAL (types 1..5 — slice or IDR) closes the AU. Each closed AU advances the
-  # shared sequence_number and 90 kHz timestamp.
-  defp group_into_aus(nals, pending, queue, seq, ts) do
+  # shared sequence_number and 90 kHz timestamp by `ts_increment` (= 90_000/fps).
+  defp group_into_aus(nals, pending, queue, seq, ts, ts_increment) do
     Enum.reduce(nals, {pending, queue, seq, ts}, fn nal, {pending, queue, seq, ts} ->
       case nal_type(nal) do
         type when type in @nal_vcl_types ->
           au_nals = Enum.reverse([nal | pending])
           next_seq = rem(seq + 1, 65_536)
-          next_ts = rem(ts + 6_000, 4_294_967_296)
+          next_ts = rem(ts + ts_increment, 4_294_967_296)
           {[], :queue.in({au_nals, next_seq, next_ts}, queue), next_seq, next_ts}
 
         _non_vcl ->
@@ -286,8 +293,11 @@ defmodule NervesView.Camera.Producer.Libcamera do
     saturation = Map.get(color_config, :saturation, 1.0) |> Float.to_string()
     contrast = Map.get(color_config, :contrast, 1.0) |> Float.to_string()
     sharpness = Map.get(color_config, :sharpness, 1.0) |> Float.to_string()
+    rotation = Map.get(color_config, :rotation, 0)
+    hflip? = Map.get(color_config, :hflip, false)
+    vflip? = Map.get(color_config, :vflip, false)
 
-    args = [
+    base_args = [
       "-t",
       "0",
       "--inline",
@@ -319,9 +329,15 @@ defmodule NervesView.Camera.Producer.Libcamera do
       to_string(width),
       "--height",
       to_string(height),
-      "-o",
-      "-"
+      "--rotation",
+      to_string(rotation)
     ]
+
+    flip_args =
+      (if hflip?, do: ["--hflip"], else: []) ++
+        if vflip?, do: ["--vflip"], else: []
+
+    args = base_args ++ flip_args ++ ["-o", "-"]
 
     port =
       Port.open({:spawn_executable, exec}, [

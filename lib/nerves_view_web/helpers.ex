@@ -16,12 +16,16 @@ defmodule NervesViewWeb.Helpers do
 
   @doc """
   Format a unix timestamp shifted by the browser's tz offset (minutes).
-  Positive offset = east of UTC (IST +330, EST -300).
+  Positive offset = east of UTC (IST +330, EST -300). When `tz_offset_minutes`
+  is `nil` (we haven't heard from the browser yet), shows dashes — better than
+  flashing UTC briefly and looking "wrong" to a user in any other zone.
   """
   def fmt_ts_local(unix, tz_offset_minutes, format \\ "%H:%M:%S")
   def fmt_ts_local(nil, _tz, _fmt), do: "--:--:--"
+  def fmt_ts_local(_unix, nil, _fmt), do: "--:--:--"
 
-  def fmt_ts_local(unix, tz_offset_minutes, format) when is_integer(unix) do
+  def fmt_ts_local(unix, tz_offset_minutes, format)
+      when is_integer(unix) and is_integer(tz_offset_minutes) do
     case DateTime.from_unix(unix) do
       {:ok, dt} ->
         local_dt = DateTime.add(dt, tz_offset_minutes * 60, :second)
@@ -35,7 +39,9 @@ defmodule NervesViewWeb.Helpers do
   def fmt_ts_local(_, _tz, _fmt), do: "--:--:--"
 
   @doc "Convert a naive Date + tz offset (minutes) into a {from_unix, to_unix} UTC window."
-  def date_to_utc_window(date_iso8601, tz_offset_minutes) do
+  def date_to_utc_window(_date_iso8601, nil), do: {nil, nil}
+
+  def date_to_utc_window(date_iso8601, tz_offset_minutes) when is_integer(tz_offset_minutes) do
     with {:ok, date} <- Date.from_iso8601(date_iso8601),
          {:ok, local_start} <- DateTime.new(date, ~T[00:00:00]),
          {:ok, local_end} <- DateTime.new(date, ~T[23:59:59]) do

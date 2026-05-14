@@ -16,7 +16,7 @@ defmodule NervesViewWeb.RecordingsLive do
      |> assign(camera_filter: "")
      |> assign(date_filter: "")
      |> assign(page: 1)
-     |> assign(tz_offset: 0)
+     |> assign(tz_offset: NervesView.tz_offset_minutes())
      |> assign_filter_form()
      |> load_clips()}
   end
@@ -36,11 +36,6 @@ defmodule NervesViewWeb.RecordingsLive do
   end
 
   @impl true
-  def handle_event("tz:offset", %{"offset_minutes" => offset}, socket) do
-    off = String.to_integer(offset)
-    {:noreply, assign(socket, tz_offset: off)}
-  end
-
   def handle_event("filter", %{"filter" => %{"camera_id" => cam, "date" => date}}, socket) do
     {:noreply,
      socket
@@ -81,6 +76,10 @@ defmodule NervesViewWeb.RecordingsLive do
   end
 
   defp date_window("", _tz_offset), do: {nil, nil}
+  # No tz yet — don't pretend to know which UTC window represents "today
+  # in the user's local zone". Just don't filter; the table will show all
+  # clips momentarily, then reload once tz arrives.
+  defp date_window(_date_str, nil), do: {nil, nil}
 
   defp date_window(date_str, tz_offset) do
     date_to_utc_window(date_str, tz_offset)

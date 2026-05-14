@@ -1,10 +1,15 @@
 defmodule NervesView.Camera.Config do
   @moduledoc """
-  Per-camera color + stream tuning, persisted alongside the camera registry.
+  Per-camera color + stream + orientation tuning, persisted alongside the
+  camera registry.
 
-  Stream defaults are tuned for Pi Zero 2 W headroom:
-    - 640x480 @ 10 fps, 600 kbps — readable detail, smooth-enough, leaves
-      CPU for the Elixir-side NAL/RTP/SRTP path
+  Stream defaults are tuned for Pi Zero 2 W *unattended* operation:
+    - 480x360 @ 8 fps, 400 kbps — keeps the BEAM's per-frame NAL/RTP/SRTP
+      load down so the SoC has headroom for the encoder + WiFi stack
+      without baking the silicon over months of continuous use.
+
+  Users can dial these up per-camera from the live view popover when their
+  particular Pi can take it.
   """
 
   defstruct awb_mode: :auto,
@@ -12,13 +17,17 @@ defmodule NervesView.Camera.Config do
             contrast: 1.0,
             sharpness: 1.0,
             exposure_mode: :normal,
-            width: 640,
-            height: 480,
-            fps: 10,
-            bitrate: 600_000
+            width: 480,
+            height: 360,
+            fps: 8,
+            bitrate: 400_000,
+            rotation: 0,
+            hflip: false,
+            vflip: false
 
   @valid_awb_modes ~w(auto incandescent tungsten fluorescent indoor daylight cloudy)a
   @valid_exposure_modes ~w(normal short long)a
+  @valid_rotations [0, 180]
 
   @min_fps 1
   @max_fps 30
@@ -34,7 +43,10 @@ defmodule NervesView.Camera.Config do
           width: pos_integer(),
           height: pos_integer(),
           fps: pos_integer(),
-          bitrate: pos_integer()
+          bitrate: pos_integer(),
+          rotation: 0 | 180,
+          hflip: boolean(),
+          vflip: boolean()
         }
 
   @spec new(map()) :: {:ok, t()} | {:error, term()}
@@ -47,16 +59,19 @@ defmodule NervesView.Camera.Config do
        sharpness: cast_float(Map.get(attrs, "sharpness") || Map.get(attrs, :sharpness), 1.0),
        exposure_mode:
          cast_exposure(Map.get(attrs, "exposure_mode") || Map.get(attrs, :exposure_mode)),
-       width: cast_resolution(Map.get(attrs, "width") || Map.get(attrs, :width), 640),
-       height: cast_resolution(Map.get(attrs, "height") || Map.get(attrs, :height), 480),
-       fps: cast_int(Map.get(attrs, "fps") || Map.get(attrs, :fps), 10, @min_fps, @max_fps),
+       width: cast_resolution(Map.get(attrs, "width") || Map.get(attrs, :width), 480),
+       height: cast_resolution(Map.get(attrs, "height") || Map.get(attrs, :height), 360),
+       fps: cast_int(Map.get(attrs, "fps") || Map.get(attrs, :fps), 8, @min_fps, @max_fps),
        bitrate:
          cast_int(
            Map.get(attrs, "bitrate") || Map.get(attrs, :bitrate),
-           600_000,
+           400_000,
            @min_bitrate,
            @max_bitrate
-         )
+         ),
+       rotation: cast_rotation(Map.get(attrs, "rotation") || Map.get(attrs, :rotation)),
+       hflip: cast_bool(Map.get(attrs, "hflip") || Map.get(attrs, :hflip), false),
+       vflip: cast_bool(Map.get(attrs, "vflip") || Map.get(attrs, :vflip), false)
      }}
   end
 
@@ -70,10 +85,13 @@ defmodule NervesView.Camera.Config do
       contrast: Keyword.get(opts, :contrast, 1.0),
       sharpness: Keyword.get(opts, :sharpness, 1.0),
       exposure_mode: cast_exposure(Keyword.get(opts, :exposure, :normal)),
-      width: Keyword.get(opts, :width, 640),
-      height: Keyword.get(opts, :height, 480),
-      fps: Keyword.get(opts, :fps, 10),
-      bitrate: Keyword.get(opts, :bitrate, 600_000)
+      width: Keyword.get(opts, :width, 480),
+      height: Keyword.get(opts, :height, 360),
+      fps: Keyword.get(opts, :fps, 8),
+      bitrate: Keyword.get(opts, :bitrate, 400_000),
+      rotation: cast_rotation(Keyword.get(opts, :rotation, 0)),
+      hflip: Keyword.get(opts, :hflip, false),
+      vflip: Keyword.get(opts, :vflip, false)
     }
   end
 
@@ -140,4 +158,27 @@ defmodule NervesView.Camera.Config do
   end
 
   defp cast_resolution(_, default), do: default
+
+  defp cast_rotation(nil), do: 0
+  defp cast_rotation(v) when v in @valid_rotations, do: v
+
+  defp cast_rotation(v) when is_binary(v) do
+    case Integer.parse(v) do
+      {n, _} when n in @valid_rotations -> n
+      _ -> 0
+    end
+  end
+
+  defp cast_rotation(_), do: 0
+
+  defp cast_bool(nil, default), do: default
+  defp cast_bool(true, _default), do: true
+  defp cast_bool(false, _default), do: false
+  # HTML checkbox sends "on" / "true". Absent checkbox sends nothing — defaults
+  # to false from the `nil` clause above when the form omits the field.
+  defp cast_bool("true", _default), do: true
+  defp cast_bool("false", _default), do: false
+  defp cast_bool("on", _default), do: true
+  defp cast_bool("off", _default), do: false
+  defp cast_bool(_, default), do: default
 end

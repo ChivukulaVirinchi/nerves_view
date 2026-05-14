@@ -1,5 +1,15 @@
 import Config
 
+watchers =
+  if System.get_env("NERVES_VIEW_DEV_WATCHERS") == "1" do
+    [
+      esbuild: {Esbuild, :install_and_run, [:nerves_view, ~w(--sourcemap=inline --watch)]},
+      tailwind: {Tailwind, :install_and_run, [:nerves_view, ~w(--watch)]}
+    ]
+  else
+    []
+  end
+
 config :nerves_view, NervesViewWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4000],
   check_origin: false,
@@ -7,10 +17,7 @@ config :nerves_view, NervesViewWeb.Endpoint,
   debug_errors: true,
   secret_key_base:
     "dev_secret_key_base_please_change_me_1234567890_abcdefghijklmnopqrstuvwxyz_1234",
-  watchers: [
-    esbuild: {Esbuild, :install_and_run, [:nerves_view, ~w(--sourcemap=inline --watch)]},
-    tailwind: {Tailwind, :install_and_run, [:nerves_view, ~w(--watch)]}
-  ],
+  watchers: watchers,
   live_reload: [
     patterns: [
       ~r"priv/static/.*(js|css|png|jpeg|jpg|gif|svg)$"E,
@@ -23,3 +30,7 @@ config :logger, :console, format: "[$level] $message\n"
 
 config :phoenix, :stacktrace_depth, 20
 config :phoenix, :plug_init_mode, :runtime
+
+config :phoenix_live_reload,
+  backend: :fs_poll,
+  dirs: ["assets", "lib", "priv/static"]

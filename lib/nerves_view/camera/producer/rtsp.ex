@@ -30,6 +30,10 @@ defmodule NervesView.Camera.Producer.RTSP do
   @impl true
   def init(opts) do
     source_path = Keyword.fetch!(opts, :source_path)
+    # RTSP source fps is not negotiated here; assume 30 fps as the common case.
+    # Future: parse the SDP from the source to derive this.
+    fps = Keyword.get(opts, :fps, 30)
+    ts_increment = div(90_000, fps)
 
     with {:ok, exec} <- find_ffmpeg(),
          {:ok, port} <- open_port(exec, source_path) do
@@ -51,7 +55,8 @@ defmodule NervesView.Camera.Producer.RTSP do
          pending_nals: [],
          buffer: <<>>,
          port: port,
-         exec: exec
+         exec: exec,
+         ts_increment: ts_increment
        }}
     else
       {:error, reason} -> {:stop, reason}
@@ -106,7 +111,8 @@ defmodule NervesView.Camera.Producer.RTSP do
             state.pending_nals,
             state.au_queue,
             state.sequence,
-            state.timestamp
+            state.timestamp,
+            state.ts_increment
           )
 
         {:noreply,
@@ -193,13 +199,13 @@ defmodule NervesView.Camera.Producer.RTSP do
     _ -> {:error, :ffmpeg_port_open_failed}
   end
 
-  defp group_into_aus(nals, pending, queue, seq, ts) do
+  defp group_into_aus(nals, pending, queue, seq, ts, ts_increment) do
     Enum.reduce(nals, {pending, queue, seq, ts}, fn nal, {pending, queue, seq, ts} ->
       case nal_type(nal) do
         type when type in @nal_vcl_types ->
           au_nals = Enum.reverse([nal | pending])
           next_seq = rem(seq + 1, 65_536)
-          next_ts = rem(ts + 6_000, 4_294_967_296)
+          next_ts = rem(ts + ts_increment, 4_294_967_296)
           {[], :queue.in({au_nals, next_seq, next_ts}, queue), next_seq, next_ts}
 
         _non_vcl ->

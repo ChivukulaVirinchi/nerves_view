@@ -5,6 +5,18 @@
 # this project.
 import Config
 
+if config_env() == :dev and Mix.target() != :host and "phx.server" in System.argv() do
+  Mix.raise("""
+  mix phx.server must run with MIX_TARGET=host.
+
+  Run:
+      MIX_TARGET=host mix phx.server
+
+  Target builds are for firmware/upload/burn and can start target-only networking
+  or cross-compile native dependencies that cannot run on this machine.
+  """)
+end
+
 # Enable the Nerves integration with Mix
 Application.start(:nerves_bootstrap)
 
@@ -25,7 +37,12 @@ config :nerves_view,
   persistence_dir: "tmp/persistence",
   recording_segment_duration: 6,
   recording_retention_hours: 720,
-  ice_servers: [%{urls: "stun:stun.l.google.com:19302"}]
+  ice_servers: [%{urls: "stun:stun.l.google.com:19302"}],
+  # Display timezone offset (minutes east of UTC). IST = 330. Set on the
+  # firmware install; everything in the UI is rendered against this. One
+  # source of truth — no browser-detection dance, no LiveSocket race.
+  # Change here + rebuild firmware to deploy in a different zone.
+  tz_offset_minutes: 330
 
 config :nerves_view, NervesView.Repo,
   database: "tmp/nerves_view.db",

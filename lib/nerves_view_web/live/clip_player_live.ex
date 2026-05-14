@@ -20,10 +20,10 @@ defmodule NervesViewWeb.ClipPlayerLive do
       {:ok, clip} ->
         {:ok,
          socket
-         |> assign(page_title: "Recording · #{format_ts(clip.started_at, 0)}")
+         |> assign(page_title: "Recording")
          |> assign(clip: clip)
          |> assign(playlist_url: ~p"/recordings/#{clip.id}/playlist.m3u8")
-         |> assign(tz_offset: 0)}
+         |> assign(tz_offset: NervesView.tz_offset_minutes())}
 
       {:error, _} ->
         {:ok,
@@ -31,12 +31,6 @@ defmodule NervesViewWeb.ClipPlayerLive do
          |> put_flash(:error, "Recording not found.")
          |> redirect(to: ~p"/recordings")}
     end
-  end
-
-  @impl true
-  def handle_event("tz:offset", %{"offset_minutes" => offset}, socket) do
-    off = String.to_integer(offset)
-    {:noreply, assign(socket, tz_offset: off)}
   end
 
   @impl true

@@ -38,13 +38,16 @@ defmodule NervesView.Network.WiFiBootstrap do
 
   defp configure_wifi(ssid, psk) do
     if Code.ensure_loaded?(VintageNet) do
-      VintageNet.configure("wlan0", %{
-        type: VintageNetWiFi,
-        ipv4: %{method: :dhcp},
-        vintage_net_wifi: %{
-          networks: [%{ssid: ssid, psk: psk, key_mgmt: :wpa_psk}]
+      apply(VintageNet, :configure, [
+        "wlan0",
+        %{
+          type: VintageNetWiFi,
+          ipv4: %{method: :dhcp},
+          vintage_net_wifi: %{
+            networks: [%{ssid: ssid, psk: psk, key_mgmt: :wpa_psk}]
+          }
         }
-      })
+      ])
     else
       {:error, :vintage_net_not_loaded}
     end

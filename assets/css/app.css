@@ -237,10 +237,110 @@ body::before {
   display: block;
 }
 
-/* Full-width viewport for camera detail page */
+/* Full-width viewport for camera detail page. The Pi camera streams at 4:3
+   (480x360 / 640x480 etc.), so use 4:3 to avoid the cropping `object-fit: cover`
+   would do against a 16:9 box. Cap height generously so the feed dominates the
+   page on desktop but never pushes everything else off-screen on a phone. */
 .cam-vp-full {
-  aspect-ratio: 16 / 9;
-  max-height: 70vh;
+  aspect-ratio: 4 / 3;
+  max-height: 80vh;
+  width: 100%;
+}
+
+.cam-vp-full .cam-vid {
+  object-fit: contain;
+  background: black;
+  transition: transform 80ms ease-out;
+  cursor: zoom-in;
+}
+
+.cam-vp-full.zoomed .cam-vid {
+  cursor: grab;
+}
+
+/* Fullscreen via the browser API — strip layout adornments so the video
+   uses 100% of the screen, not the original 80vh box. */
+.cam-vp-full:fullscreen,
+.cam-vp-full:-webkit-full-screen {
+  aspect-ratio: auto;
+  max-height: none;
+  height: 100vh;
+  width: 100vw;
+  background: black;
+}
+
+.cam-vp-full:fullscreen .cam-vid,
+.cam-vp-full:-webkit-full-screen .cam-vid {
+  height: 100%;
+  width: 100%;
+}
+
+/* Right-edge button stack: zoom/fullscreen/settings controls. */
+.cam-controls {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  z-index: 4;
+}
+
+.cam-ctrl-btn {
+  /* 44×44 minimum hit target — Apple HIG / Material Design guideline for
+     touch. The visual is 32×32 with extra padding via flex centering;
+     prevents fat-finger mis-taps on phones. */
+  width: 2.75rem;
+  height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.4rem;
+  background: oklch(from black l c h / 0.6);
+  color: white;
+  font-weight: 600;
+  font-size: 1.05rem;
+  line-height: 1;
+  border: 1px solid oklch(from white l c h / 0.2);
+  cursor: pointer;
+  transition: background 120ms ease, transform 120ms ease;
+  /* Don't let the wrapper's drag-to-pan capture click intent on the buttons. */
+  touch-action: manipulation;
+}
+
+.cam-ctrl-btn:hover {
+  background: oklch(from black l c h / 0.82);
+  transform: scale(1.05);
+}
+
+.cam-ctrl-btn:active {
+  transform: scale(0.95);
+}
+
+/* The primary action (Settings) stands out from the secondary zoom controls. */
+.cam-ctrl-primary {
+  background: oklch(from var(--primary) l c h / 0.85);
+  border-color: oklch(from var(--primary) l c h / 0.6);
+}
+
+.cam-ctrl-primary:hover {
+  background: var(--primary);
+}
+
+/* Zoom level badge (top-left, only visible when zoomed). */
+.cam-zoom-badge {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 4;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.4rem;
+  background: oklch(from black l c h / 0.6);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  pointer-events: none;
 }
 
 /* HUD overlay */
@@ -602,19 +702,27 @@ body::before {
   transform: rotate(30deg);
 }
 
+/* Modal-style popover: centered on the viewport with a backdrop. Anchoring
+   to the gear button broke on small screens once the camera viewport got
+   tall (popover fell below the fold); fixed-position centered always
+   works regardless of where the trigger is. */
 .color-popover-overlay {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 9;
+  z-index: 50;
+  background: oklch(0 0 0 / 0.45);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
 }
 
 .color-popover {
-  position: absolute;
-  top: 3rem;
-  right: 0.5rem;
-  z-index: 10;
-  width: 240px;
-  max-height: calc(100% - 4rem);
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 51;
+  width: min(360px, 92vw);
+  max-height: 85vh;
   overflow-y: auto;
   background: var(--popover);
   color: var(--popover-foreground);
@@ -676,6 +784,27 @@ body::before {
   font-variant-numeric: tabular-nums;
   color: var(--muted-foreground);
   font-size: 0.625rem;
+}
+
+.color-checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.color-cb {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.color-cb input[type="checkbox"] {
+  accent-color: var(--primary);
+  width: 1rem;
+  height: 1rem;
 }
 
 .color-slider {

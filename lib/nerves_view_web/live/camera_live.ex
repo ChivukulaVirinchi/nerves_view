@@ -25,6 +25,7 @@ defmodule NervesViewWeb.CameraLive do
         diag = get_diag(camera_id)
         retention = NervesView.dvr_retention_window(camera_id)
         color_config = NervesView.get_camera_color_config(camera_id)
+        time_info = NervesView.system_time_info()
 
         {:ok,
          socket
@@ -38,11 +39,12 @@ defmodule NervesViewWeb.CameraLive do
          |> assign(playback_start_ts: nil)
          |> assign(playback_base_ts: nil)
          |> assign(motion: nil)
-         |> assign(tz_offset: 0)
+         |> assign(tz_offset: NervesView.tz_offset_minutes())
          |> assign(scrubber_day: nil)
          |> assign(scrubber_day_iso: "")
          |> assign(color_config: color_config)
-         |> assign(show_color_popover: false)}
+         |> assign(show_color_popover: false)
+         |> assign(time_info: time_info)}
 
       {:error, :not_found} ->
         {:ok,
@@ -57,6 +59,7 @@ defmodule NervesViewWeb.CameraLive do
     cam_id = socket.assigns.camera.id
     diag = get_diag(cam_id)
     retention = NervesView.dvr_retention_window(cam_id)
+    time_info = NervesView.system_time_info()
 
     bounds = scrubber_bounds(socket.assigns.scrubber_day, retention, socket.assigns.tz_offset)
     {oldest, newest} = {bounds.oldest, bounds.newest}
@@ -72,8 +75,9 @@ defmodule NervesViewWeb.CameraLive do
      socket
      |> assign(diag: diag)
      |> assign(retention: retention)
+     |> assign(time_info: time_info)
      |> push_event("dvr:markers", %{markers: markers, append: false})
-     |> push_event("dvr:bounds", bounds_payload(bounds))}
+     |> push_event("dvr:bounds", bounds_payload(bounds, socket.assigns.tz_offset))}
   end
 
   def handle_info({:motion_alert, alert}, socket) do
@@ -96,16 +100,6 @@ defmodule NervesViewWeb.CameraLive do
     do: handle_webrtc_info(msg, socket)
 
   @impl true
-  def handle_event("tz:offset", %{"offset_minutes" => offset}, socket) do
-    off = ensure_int(offset)
-    bounds = scrubber_bounds(socket.assigns.scrubber_day, socket.assigns.retention, off)
-
-    {:noreply,
-     socket
-     |> assign(tz_offset: off)
-     |> push_event("dvr:bounds", bounds_payload(bounds))}
-  end
-
   def handle_event("webrtc:" <> _ = event, params, socket),
     do: handle_webrtc_event(event, params, socket)
 
@@ -189,7 +183,7 @@ defmodule NervesViewWeb.CameraLive do
          socket
          |> assign(scrubber_day: day)
          |> assign(scrubber_day_iso: day_iso)
-         |> push_event("dvr:bounds", bounds_payload(bounds))}
+         |> push_event("dvr:bounds", bounds_payload(bounds, socket.assigns.tz_offset))}
 
       _ ->
         {:noreply, socket}
@@ -212,6 +206,7 @@ defmodule NervesViewWeb.CameraLive do
 
     exp = parse_known_atom(params["exposure_mode"], ~w(normal short long), current.exposure_mode)
     {w, h} = parse_resolution(params["resolution"], {current.width, current.height})
+    rot = parse_rotation(params["rotation"], current.rotation)
 
     new_config = %NervesView.Camera.Config{
       awb_mode: awb,
@@ -222,7 +217,12 @@ defmodule NervesViewWeb.CameraLive do
       width: w,
       height: h,
       fps: parse_param_int(params["fps"], current.fps, 1, 30),
-      bitrate: parse_param_int(params["bitrate"], current.bitrate, 100_000, 4_000_000)
+      bitrate: parse_param_int(params["bitrate"], current.bitrate, 100_000, 4_000_000),
+      rotation: rot,
+      # Unchecked checkboxes are absent from form params — treat absence as
+      # false rather than "keep current" so a real uncheck takes effect.
+      hflip: parse_checkbox(params["hflip"]),
+      vflip: parse_checkbox(params["vflip"])
     }
 
     {:noreply, assign(socket, color_config: new_config)}
@@ -281,8 +281,13 @@ defmodule NervesViewWeb.CameraLive do
 
       <.card class="overflow-hidden">
         <:content class="p-0">
-          <%!-- Video viewport with color-popover toggle --%>
-          <div class="cam-vp cam-vp-full relative">
+          <%!-- Video viewport with color-popover toggle, fullscreen, and pinch/wheel zoom --%>
+          <div
+            id={"vp-#{@camera.id}"}
+            class="cam-vp cam-vp-full relative"
+            phx-hook="CameraZoom"
+            data-camera-id={@camera.id}
+          >
             <video
               id={"v-#{@camera.id}"}
               class="cam-vid"
@@ -304,16 +309,33 @@ defmodule NervesViewWeb.CameraLive do
               </div>
             </div>
 
-            <%!-- Color controls gear button --%>
-            <button
-              phx-click="toggle_color_popover"
-              class="color-toggle-btn group"
-              title="Color settings"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4">
-                <path d="M12 3c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 14c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6-8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM4.93 6.34l2.83 2.83c.78.78 2.05.78 2.83 0l2.83-2.83c.78-.78.78-2.05 0-2.83L10.59.68c-.78-.78-2.05-.78-2.83 0L4.93 3.51c-.78.78-.78 2.05 0 2.83zm12.14 0l-2.83 2.83c-.78.78-.78 2.05 0 2.83l2.83 2.83c.78.78 2.05.78 2.83 0l2.83-2.83c.78-.78.78-2.05 0-2.83l-2.83-2.83c-.78-.78-2.05-.78-2.83 0zM6.34 19.07l2.83-2.83c.78-.78 2.05-.78 2.83 0l2.83 2.83c.78.78.78 2.05 0 2.83l-2.83 2.83c-.78.78-2.05.78-2.83 0l-2.83-2.83c-.78-.78-.78-2.05 0-2.83z"/>
-              </svg>
-            </button>
+            <%!-- Zoom level indicator (hidden at 1x) --%>
+            <div class="cam-zoom-badge" data-zoom-badge style="display:none">1.0×</div>
+
+            <%!-- Right-side button stack. Settings (gear) first because it's
+                 the most-used; zoom + fullscreen below. The gear is labelled
+                 "Settings" on small screens (icon + text) so it's unambiguous. --%>
+            <div class="cam-controls">
+              <button
+                phx-click="toggle_color_popover"
+                class="cam-ctrl-btn cam-ctrl-primary"
+                title="Camera settings (rotation, white balance, stream quality)"
+                type="button"
+                aria-label="Camera settings"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
+                  <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+                </svg>
+              </button>
+              <button data-zoom-out class="cam-ctrl-btn" title="Zoom out (mousewheel / pinch)" aria-label="Zoom out" type="button">−</button>
+              <button data-zoom-in class="cam-ctrl-btn" title="Zoom in (mousewheel / pinch)" aria-label="Zoom in" type="button">+</button>
+              <button data-zoom-reset class="cam-ctrl-btn" title="Reset zoom" aria-label="Reset zoom" type="button">1×</button>
+              <button data-fullscreen class="cam-ctrl-btn" title="Fullscreen" aria-label="Fullscreen" type="button">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4">
+                  <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+                </svg>
+              </button>
+            </div>
 
             <%!-- Color popover --%>
             <%= if @show_color_popover do %>
@@ -412,6 +434,29 @@ defmodule NervesViewWeb.CameraLive do
                       value={@color_config.bitrate} class="color-slider" />
                   </label>
 
+                  <div class="color-popover-divider">Orientation</div>
+
+                  <%!-- Rotation --%>
+                  <label class="color-field">
+                    <span class="color-field-label">Rotation</span>
+                    <select name="rotation" class="input input-sm w-full">
+                      <option value="0" selected={@color_config.rotation == 0}>0° (normal)</option>
+                      <option value="180" selected={@color_config.rotation == 180}>180° (camera mounted upside down)</option>
+                    </select>
+                  </label>
+
+                  <%!-- Flips --%>
+                  <div class="color-checkboxes">
+                    <label class="color-cb">
+                      <input type="checkbox" name="hflip" value="true" checked={@color_config.hflip} />
+                      <span>Horizontal flip (mirror)</span>
+                    </label>
+                    <label class="color-cb">
+                      <input type="checkbox" name="vflip" value="true" checked={@color_config.vflip} />
+                      <span>Vertical flip</span>
+                    </label>
+                  </div>
+
                   <div class="color-popover-actions">
                     <.button type="button" variant="ghost" size="sm" phx-click="reset_color_config">
                       Reset Defaults
@@ -438,7 +483,9 @@ defmodule NervesViewWeb.CameraLive do
             </form>
           </div>
 
-          <%!-- Timeline scrubber --%>
+          <%!-- Timeline scrubber. The `data-*` attrs are the first-render
+               state; live updates ride on `dvr:bounds` events. `data-tz-known="0"`
+               tells the JS to hide labels until the browser pushes its offset. --%>
           <div
             id={"tl-#{@camera.id}"}
             class="cam-tl"
@@ -452,6 +499,8 @@ defmodule NervesViewWeb.CameraLive do
             data-has-recordings={if tl_bounds.has_recordings, do: "1", else: "0"}
             data-day-label={tl_bounds.day_label || ""}
             data-server-time={System.system_time(:second)}
+            data-tz-offset={@tz_offset}
+            data-tz-known="1"
           />
         </:content>
       </.card>
@@ -475,6 +524,13 @@ defmodule NervesViewWeb.CameraLive do
 
         <.badge variant={pipe_variant(@diag)}>
           {pipe_label(@diag)}
+        </.badge>
+
+        <%!-- Pi system clock — diagnostic. "NOT synced" means NTP hasn't
+             validated the clock yet; the displayed time may still be right
+             if it was set manually or restored from persistence. --%>
+        <.badge variant={if @time_info.synchronized, do: "outline", else: "destructive"}>
+          Pi&nbsp;clock: {fmt_ts_local(@time_info.system_time, @tz_offset, "%H:%M:%S")} · {if @time_info.synchronized, do: "synced", else: "NOT synced"}
         </.badge>
       </div>
 
@@ -510,6 +566,11 @@ defmodule NervesViewWeb.CameraLive do
   #   :has_recordings          true if there's any playable region inside the axis
   #   :day_label               ISO date being shown, or nil
   defp scrubber_bounds(day, retention, tz_offset_minutes)
+
+  # tz_offset hasn't been pushed yet (initial render) — treat as 0 for the
+  # math; the JS-side render will hide timestamps anyway until offset arrives.
+  defp scrubber_bounds(day, retention, nil),
+    do: scrubber_bounds(day, retention, 0)
 
   defp scrubber_bounds(nil, retention, _tz_offset_minutes) do
     now = System.system_time(:second)
@@ -594,7 +655,7 @@ defmodule NervesViewWeb.CameraLive do
     end
   end
 
-  defp bounds_payload(bounds) do
+  defp bounds_payload(bounds, tz_offset_minutes) do
     %{
       server_time: System.system_time(:second),
       oldest: bounds.oldest,
@@ -602,7 +663,11 @@ defmodule NervesViewWeb.CameraLive do
       axis_start: bounds.axis_start,
       axis_end: bounds.axis_end,
       has_recordings: bounds.has_recordings,
-      day_label: bounds.day_label
+      day_label: bounds.day_label,
+      # JS uses this to format labels/tooltips so the scrubber matches every
+      # other timestamp in the app instead of independently using browser-local.
+      tz_offset_minutes: tz_offset_minutes || 0,
+      tz_known: not is_nil(tz_offset_minutes)
     }
   end
 
@@ -657,6 +722,14 @@ defmodule NervesViewWeb.CameraLive do
   defp parse_resolution("640x480", _default), do: {640, 480}
   defp parse_resolution("800x600", _default), do: {800, 600}
   defp parse_resolution(_, default), do: default
+
+  defp parse_rotation("0", _default), do: 0
+  defp parse_rotation("180", _default), do: 180
+  defp parse_rotation(_, default), do: default
+
+  defp parse_checkbox("true"), do: true
+  defp parse_checkbox("on"), do: true
+  defp parse_checkbox(_), do: false
 
   defp parse_known_atom(value, allowed, default) when is_binary(value) do
     if value in allowed, do: String.to_existing_atom(value), else: default

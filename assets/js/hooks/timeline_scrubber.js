@@ -1,28 +1,33 @@
 /**
  * TimelineScrubber — NVR-style draggable DVR timeline below each camera.
  *
- * Renders an absolute-time axis (HH:MM:SS labels), a draggable cursor, a
- * hover tooltip, a LIVE badge, and motion markers. Always-visible — re-renders
- * every dvr:bounds tick. Bounds-checked: out-of-retention clicks clamp instead
- * of auto-jumping forward.
+ * Renders an absolute-time axis, draggable cursor, hover tooltip, LIVE
+ * badge, and motion markers. Single source of truth for timezone: the
+ * `tz_offset_minutes` field on `dvr:bounds`, pushed by the server based on
+ * what the browser sent via the TimezoneDetector hook. We deliberately do
+ * NOT use `toLocaleTimeString()` — that would silently disagree with the
+ * server's `fmt_ts_local` (which other timestamps in the app use) if the
+ * browser's tz and the server's stored tz_offset diverge.
  *
- * DOM data attributes (read once at mount, then maintained via dvr:bounds):
- *   data-camera-id, data-oldest, data-newest, data-server-time
+ * Pointer Events unify mouse + touch + pen on a single set of handlers
+ * (replaces the previous mouse-only and touch-only listener pairs, which
+ * caused taps to either scroll the page or be ignored on phones).
  *
  * Server events handled:
- *   dvr:bounds        %{server_time, oldest, newest}   — every ~5s, source of truth
- *   dvr:markers       %{markers: [{ts: ...}], append}  — motion event markers
- *   dvr:mode          %{mode: "live" | "playback"}     — when mode changes
- *   dvr:playback_pos  %{ts: ...}                       — playback cursor sync
- *   dvr:seek_rejected %{reason, oldest?, newest?}      — seek failed; reset cursor
+ *   dvr:bounds        %{server_time, oldest, newest, axis_start, axis_end,
+ *                        has_recordings, day_label, tz_offset_minutes, tz_known}
+ *   dvr:markers       %{markers: [{ts: ...}], append}
+ *   dvr:mode          %{mode: "live" | "playback"}
+ *   dvr:playback_pos  %{ts: ...}
+ *   dvr:seek_rejected %{reason, oldest?, newest?}
  *
  * Server events pushed:
- *   dvr:seek         %{camera_id, from}  — seek to timestamp
- *   dvr:go_live      %{camera_id}        — return to live
+ *   dvr:seek          %{camera_id, from}
+ *   dvr:go_live       %{camera_id}
  */
 
-const SEGMENT_DURATION = 6  // seconds — for snap-to-segment
-const LIVE_MARGIN = 5       // seconds — how close to "now" counts as live
+const SEGMENT_DURATION = 6
+const LIVE_MARGIN = 5
 
 const TimelineScrubber = {
   mounted() {
@@ -36,21 +41,33 @@ const TimelineScrubber = {
     this.dayLabel = this.el.dataset.dayLabel || null
     this.serverTime = parseInt(this.el.dataset.serverTime, 10) || nowSec()
     this.timeOffset = this.serverTime - nowSec()
+    this.tzOffsetMinutes = parseInt(this.el.dataset.tzOffset, 10) || 0
+    this.tzKnown = this.el.dataset.tzKnown === "1"
     this.markers = []
     this.mode = "live"
     this.dragging = false
+    this.activePointer = null
     this.hoverTs = null
 
     this.buildDOM()
     this.bindEvents()
     this.render()
 
-    // Auto-advance the live cursor every second.
     this._tick = setInterval(() => this.tickAdvance(), 1000)
 
     this.handleEvent(
       "dvr:bounds",
-      ({ server_time, oldest, newest, axis_start, axis_end, has_recordings, day_label }) => {
+      ({
+        server_time,
+        oldest,
+        newest,
+        axis_start,
+        axis_end,
+        has_recordings,
+        day_label,
+        tz_offset_minutes,
+        tz_known,
+      }) => {
         this.serverTime = server_time
         this.timeOffset = server_time - nowSec()
         this.oldest = oldest
@@ -59,12 +76,14 @@ const TimelineScrubber = {
         this.axisEnd = axis_end ?? newest
         this.hasRecordings = !!has_recordings
         this.dayLabel = day_label || null
+        this.tzOffsetMinutes = tz_offset_minutes ?? 0
+        this.tzKnown = !!tz_known
         this.render()
-      }
+      },
     )
 
     this.handleEvent("dvr:markers", ({ markers, append }) => {
-      this.markers = append ? (this.markers || []).concat(markers || []) : (markers || [])
+      this.markers = append ? (this.markers || []).concat(markers || []) : markers || []
       this.renderMarkers()
     })
 
@@ -80,7 +99,6 @@ const TimelineScrubber = {
     })
 
     this.handleEvent("dvr:seek_rejected", () => {
-      // Snap cursor back to a safe spot — live edge — and exit playback.
       this.mode = "live"
       this.setCursorAt(this.serverNow())
       this.renderLive()
@@ -96,8 +114,6 @@ const TimelineScrubber = {
   buildDOM() {
     this.el.innerHTML = ""
 
-    // Track is the click target. Layered children: out-of-bounds shading,
-    // markers, fill, cursor, hover-tooltip, empty-state overlay.
     this.track = el("div", "tl-track")
     this.oobLeft = el("div", "tl-oob tl-oob-left")
     this.oobRight = el("div", "tl-oob tl-oob-right")
@@ -127,17 +143,18 @@ const TimelineScrubber = {
   },
 
   bindEvents() {
-    this.track.addEventListener("mousedown", (e) => this.startDrag(e))
-    this.track.addEventListener("mousemove", (e) => this.onHover(e))
-    this.track.addEventListener("mouseleave", () => this.onHoverEnd())
-    document.addEventListener("mousemove", (e) => this.onDrag(e))
-    document.addEventListener("mouseup", () => this.endDrag())
-
-    this.track.addEventListener("touchstart", (e) => this.startDrag(e.touches[0]), { passive: true })
-    document.addEventListener("touchmove", (e) => this.onDrag(e.touches[0]), { passive: true })
-    document.addEventListener("touchend", () => this.endDrag())
+    // Pointer Events: unify mouse / touch / pen. `setPointerCapture` keeps
+    // events flowing to the track even when the pointer leaves it, which is
+    // critical for drag-to-seek on a phone where the finger easily strays
+    // off the 6px tall bar.
+    this.track.addEventListener("pointerdown", (e) => this.onPointerDown(e))
+    this.track.addEventListener("pointermove", (e) => this.onPointerMove(e))
+    this.track.addEventListener("pointerup", (e) => this.onPointerUp(e))
+    this.track.addEventListener("pointercancel", (e) => this.onPointerUp(e))
+    this.track.addEventListener("pointerleave", () => this.onHoverEnd())
 
     this.liveLabel.addEventListener("click", () => {
+      if (!this.hasRecordings && !this.tzKnown) return
       this.mode = "live"
       this.setCursorAt(this.serverNow())
       this.renderLive()
@@ -157,33 +174,34 @@ const TimelineScrubber = {
   },
 
   renderEmpty() {
-    if (this.hasRecordings) {
+    if (this.hasRecordings && this.tzKnown) {
       this.emptyOverlay.style.display = "none"
       this.el.classList.remove("empty")
       return
     }
-    this.emptyOverlay.textContent = this.dayLabel
-      ? `No recordings on ${this.dayLabel}`
-      : "No recordings yet"
+    this.emptyOverlay.textContent = !this.tzKnown
+      ? "Loading…"
+      : this.dayLabel
+        ? `No recordings on ${this.dayLabel}`
+        : "No recordings yet"
     this.emptyOverlay.style.display = "flex"
     this.el.classList.add("empty")
-    // Hide cursor and fill when empty — nothing to point at.
     this.cursor.style.left = "-100%"
     this.fill.style.width = "0%"
   },
 
   renderLabels() {
     this.labels.innerHTML = ""
+    if (!this.tzKnown) return
     if (this.axisSpan() <= 0) return
 
-    // 5 evenly-spaced labels across the axis (which is the day window or the
-    // retention extent — not the playable window). Labels always reflect
-    // real wall-clock time, even when no recordings exist for the day.
+    // 5 evenly-spaced labels across the axis. Format via server-supplied
+    // tz_offset so the labels match every other timestamp in the app.
     const count = 5
     for (let i = 0; i <= count; i++) {
       const ts = this.axisStart + Math.round((i / count) * this.axisSpan())
       const lbl = el("span", "tl-time-lbl")
-      lbl.textContent = formatClock(ts)
+      lbl.textContent = formatLocal(ts, this.tzOffsetMinutes, false)
       lbl.style.left = `${(i / count) * 100}%`
       this.labels.appendChild(lbl)
     }
@@ -201,7 +219,7 @@ const TimelineScrubber = {
 
       const m = el("div", "tl-marker")
       m.style.left = `${pct * 100}%`
-      m.title = formatClock(ts)
+      m.title = formatLocal(ts, this.tzOffsetMinutes, true)
       m.addEventListener("click", (e) => {
         e.stopPropagation()
         this.seekTo(ts)
@@ -210,12 +228,8 @@ const TimelineScrubber = {
     })
   },
 
-  // Shade the parts of the visible axis that are outside the playable window
-  // (oldest..newest). Lets users see at a glance which chunk of the day has
-  // recordings versus gaps at the start/end.
   renderOobRegions() {
     if (!this.hasRecordings) {
-      // Whole axis is out-of-bounds in the empty state — overlay covers it.
       this.oobLeft.style.width = "0%"
       this.oobRight.style.width = "0%"
       return
@@ -247,7 +261,7 @@ const TimelineScrubber = {
 
   showTooltip(pct, ts) {
     this.tooltip.style.left = `${pct * 100}%`
-    this.tooltip.textContent = formatClock(ts, true)
+    this.tooltip.textContent = formatLocal(ts, this.tzOffsetMinutes, true)
     this.tooltip.style.display = "block"
   },
 
@@ -262,16 +276,57 @@ const TimelineScrubber = {
     this.setCursorAt(this.serverNow())
   },
 
-  // ── Interaction ──────────────────────────────────────────────────────────
+  // ── Pointer interaction ──────────────────────────────────────────────────
 
-  onHover(e) {
-    if (this.dragging) return
+  onPointerDown(e) {
+    if (!this.tzKnown) return
+    if (!this.hasRecordings) return
     if (this.axisSpan() <= 0) return
-    const rect = this.track.getBoundingClientRect()
-    const pct = clamp((e.clientX - rect.left) / rect.width, 0, 1)
+
+    this.dragging = true
+    this.activePointer = e.pointerId
+    this.cursor.classList.add("dragging")
+
+    try {
+      this.track.setPointerCapture(e.pointerId)
+    } catch (_) {
+      // Some older browsers may not support setPointerCapture on this element.
+      // Fall back to global listeners — not needed because pointer events
+      // bubble even without capture in most modern engines.
+    }
+
+    this.moveCursorToEvent(e)
+  },
+
+  onPointerMove(e) {
+    if (this.dragging && e.pointerId === this.activePointer) {
+      this.moveCursorToEvent(e)
+    } else if (!this.dragging && e.pointerType === "mouse") {
+      // Hover tooltip on mouse only — on phones we don't get hover, and the
+      // tap-to-seek interaction already shows a tooltip at the touch point
+      // during drag.
+      const rect = this.track.getBoundingClientRect()
+      const pct = clamp((e.clientX - rect.left) / rect.width, 0, 1)
+      const ts = Math.round(this.axisStart + pct * this.axisSpan())
+      this.hoverTs = ts
+      this.showTooltip(pct, ts)
+    }
+  },
+
+  onPointerUp(e) {
+    if (!this.dragging || e.pointerId !== this.activePointer) return
+    this.dragging = false
+    this.cursor.classList.remove("dragging")
+    this.hideTooltip()
+
+    try {
+      this.track.releasePointerCapture(e.pointerId)
+    } catch (_) {}
+
+    const pct = parseFloat(this.cursor.style.left) / 100
     const ts = Math.round(this.axisStart + pct * this.axisSpan())
-    this.hoverTs = ts
-    this.showTooltip(pct, ts)
+    this.activePointer = null
+    this.seekTo(ts)
   },
 
   onHoverEnd() {
@@ -280,16 +335,7 @@ const TimelineScrubber = {
     this.hideTooltip()
   },
 
-  startDrag(e) {
-    if (!this.hasRecordings) return
-    if (this.axisSpan() <= 0) return
-    this.dragging = true
-    this.cursor.classList.add("dragging")
-    this.onDrag(e)
-  },
-
-  onDrag(e) {
-    if (!this.dragging) return
+  moveCursorToEvent(e) {
     const rect = this.track.getBoundingClientRect()
     const pct = clamp((e.clientX - rect.left) / rect.width, 0, 1)
     const ts = Math.round(this.axisStart + pct * this.axisSpan())
@@ -298,20 +344,8 @@ const TimelineScrubber = {
     this.showTooltip(pct, ts)
   },
 
-  endDrag() {
-    if (!this.dragging) return
-    this.dragging = false
-    this.cursor.classList.remove("dragging")
-    this.hideTooltip()
-
-    const pct = parseFloat(this.cursor.style.left) / 100
-    const ts = Math.round(this.axisStart + pct * this.axisSpan())
-    this.seekTo(ts)
-  },
-
-  // Snap to nearest 6s segment boundary, clamp to playable window (oldest..
-  // newest, NOT the visual axis), then either go live (within LIVE_MARGIN of
-  // now) or push a seek.
+  // Snap to nearest segment boundary, clamp to playable window, dispatch
+  // either a "go live" (cursor within LIVE_MARGIN of now) or a seek event.
   seekTo(rawTs) {
     if (!this.hasRecordings) return
 
@@ -357,12 +391,22 @@ function clamp(x, lo, hi) {
   return Math.max(lo, Math.min(x, hi))
 }
 
-// Default: HH:MM. With `withSeconds = true`: HH:MM:SS. Locale-aware.
-function formatClock(ts, withSeconds = false) {
-  const d = new Date(ts * 1000)
-  return withSeconds
-    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
-    : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+// Format a UTC unix timestamp using a fixed offset, locale-free 24-hour.
+// We add the offset to the unix ts (i.e. fake the date as UTC of the
+// shifted moment) then read components with getUTC* — so the rendered
+// digits are the local wall clock, independent of the JS engine's idea
+// of the user's tz. This guarantees identical output to the server's
+// Elixir `fmt_ts_local`.
+function formatLocal(unixSeconds, tzOffsetMinutes, withSeconds = false) {
+  const ms = (unixSeconds + tzOffsetMinutes * 60) * 1000
+  const d = new Date(ms)
+  const hh = String(d.getUTCHours()).padStart(2, "0")
+  const mm = String(d.getUTCMinutes()).padStart(2, "0")
+  if (withSeconds) {
+    const ss = String(d.getUTCSeconds()).padStart(2, "0")
+    return `${hh}:${mm}:${ss}`
+  }
+  return `${hh}:${mm}`
 }
 
 export default TimelineScrubber
