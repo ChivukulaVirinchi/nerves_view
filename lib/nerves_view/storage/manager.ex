@@ -11,6 +11,8 @@ defmodule NervesView.Storage.Manager do
   require Logger
 
   alias NervesView.Recording.Store
+  alias NervesView.Recording.PlaylistManager
+  alias NervesView.DVR.SegmentIndex
 
   @name __MODULE__
   @check_interval_ms 60_000
@@ -30,6 +32,11 @@ defmodule NervesView.Storage.Manager do
   @spec enforce_retention(keyword()) :: %{trimmed: non_neg_integer(), max_count: pos_integer()}
   def enforce_retention(opts \\ []) do
     GenServer.call(@name, {:enforce_retention, opts})
+  end
+
+  @spec clear_recordings() :: {:ok, map()} | {:error, term()}
+  def clear_recordings do
+    GenServer.call(@name, :clear_recordings, 30_000)
   end
 
   @doc """
@@ -79,6 +86,18 @@ defmodule NervesView.Storage.Manager do
     {:reply, %{trimmed: trimmed, max_count: max_count}, state}
   end
 
+  def handle_call(:clear_recordings, _from, state) do
+    with {:ok, recordings_path} <- recordings_path(),
+         {:ok, stats} <- remove_recording_contents(recordings_path) do
+      :ok = Store.clear()
+      :ok = SegmentIndex.clear()
+      :ok = PlaylistManager.clear()
+      {:reply, {:ok, stats}, state}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
   @impl true
   def handle_info(:check_disk, state) do
     case disk_usage() do
@@ -119,6 +138,54 @@ defmodule NervesView.Storage.Manager do
     end
   rescue
     e -> {:error, e}
+  end
+
+  defp recordings_path do
+    case Application.get_env(:nerves_view, :recordings_path) do
+      nil ->
+        {:error, :no_path}
+
+      path ->
+        expanded = Path.expand(path)
+
+        if expanded in ["/", "/data"] do
+          {:error, {:unsafe_recordings_path, expanded}}
+        else
+          File.mkdir_p!(expanded)
+          {:ok, expanded}
+        end
+    end
+  end
+
+  defp remove_recording_contents(recordings_path) do
+    before_stats = recording_dir_stats(recordings_path)
+
+    case File.ls(recordings_path) do
+      {:ok, entries} ->
+        Enum.each(entries, fn entry ->
+          recordings_path
+          |> Path.join(entry)
+          |> File.rm_rf()
+        end)
+
+        File.mkdir_p!(recordings_path)
+        {:ok, before_stats}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp recording_dir_stats(recordings_path) do
+    recordings_path
+    |> Path.join("**/*")
+    |> Path.wildcard()
+    |> Enum.reduce(%{files: 0, bytes: 0}, fn path, acc ->
+      case File.stat(path) do
+        {:ok, %{type: :regular, size: size}} -> %{files: acc.files + 1, bytes: acc.bytes + size}
+        _ -> acc
+      end
+    end)
   end
 
   defp parse_df_output(output) do

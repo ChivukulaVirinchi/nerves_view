@@ -145,14 +145,22 @@ defmodule NervesViewWeb.CameraLive do
          })}
 
       true ->
-        to = min(from + 600, newest)
-        hls_url = "/api/dvr/#{cam_id}/playlist.m3u8?from=#{from}&to=#{to}"
-        {playback_base, start_offset} = compute_playback_base_and_offset(cam_id, from)
+        {seek_from, adjusted?} = resolve_seek_from(cam_id, from)
+        to = min(seek_from + 600, newest)
+        hls_url = "/api/dvr/#{cam_id}/playlist.m3u8?from=#{seek_from}&to=#{to}"
+        {playback_base, start_offset} = compute_playback_base_and_offset(cam_id, seek_from)
+
+        socket =
+          if adjusted? do
+            put_flash(socket, :info, "Jumped to the nearest recording.")
+          else
+            socket
+          end
 
         {:noreply,
          socket
          |> assign(:mode, :playback)
-         |> assign(:playback_start_ts, from)
+         |> assign(:playback_start_ts, seek_from)
          |> assign(:playback_base_ts, playback_base)
          |> push_event("dvr:play", %{url: hls_url, start_offset: start_offset})
          |> push_event("dvr:mode", %{mode: "playback"})}
@@ -233,21 +241,24 @@ defmodule NervesViewWeb.CameraLive do
     cam_id = socket.assigns.camera.id
     config = socket.assigns.color_config
 
-    # Persist config, then restart pipeline
-    :ok = NervesView.set_camera_color_config(cam_id, Map.from_struct(config))
-
-    case NervesView.restart_camera_pipeline(cam_id) do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> assign(show_color_popover: false)
-         |> put_flash(:info, "Color settings applied — pipeline restarted.")}
-
+    with :ok <- NervesView.set_camera_color_config(cam_id, Map.from_struct(config)),
+         {:ok, _} <- NervesView.restart_camera_pipeline(cam_id) do
+      {:noreply,
+       socket
+       |> assign(show_color_popover: false)
+       |> put_flash(:info, "Color settings applied — pipeline restarted.")}
+    else
       {:error, reason} ->
         {:noreply,
          socket
          |> assign(show_color_popover: false)
-         |> put_flash(:error, "Pipeline restart failed: #{inspect(reason)}")}
+         |> put_flash(:error, "Color settings failed: #{inspect(reason)}")}
+
+      reason ->
+        {:noreply,
+         socket
+         |> assign(show_color_popover: false)
+         |> put_flash(:error, "Color settings failed: #{inspect(reason)}")}
     end
   end
 
@@ -505,6 +516,19 @@ defmodule NervesViewWeb.CameraLive do
     case segs do
       [] -> {from_ts, 0}
       [first | _] -> {first.started_at, max(0, from_ts - first.started_at)}
+    end
+  end
+
+  defp resolve_seek_from(camera_id, requested_ts) do
+    case NervesView.dvr_segments(camera_id, requested_ts, requested_ts + 600) do
+      [_ | _] ->
+        {requested_ts, false}
+
+      [] ->
+        case NervesView.dvr_nearest_segment(camera_id, requested_ts) do
+          nil -> {requested_ts, false}
+          segment -> {segment.started_at, true}
+        end
     end
   end
 

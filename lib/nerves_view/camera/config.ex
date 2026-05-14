@@ -53,15 +53,29 @@ defmodule NervesView.Camera.Config do
 
   defp cast_awb(nil), do: :auto
   defp cast_awb(mode) when is_atom(mode), do: if(mode in @valid_awb_modes, do: mode, else: :auto)
-  defp cast_awb(mode) when is_binary(mode), do: cast_awb(String.to_existing_atom(mode))
+
+  defp cast_awb(mode) when is_binary(mode) do
+    mode
+    |> String.trim()
+    |> String.downcase()
+    |> then(fn value ->
+      Enum.find(@valid_awb_modes, :auto, &(Atom.to_string(&1) == value))
+    end)
+  end
 
   defp cast_exposure(nil), do: :normal
 
   defp cast_exposure(mode) when is_atom(mode),
     do: if(mode in @valid_exposure_modes, do: mode, else: :normal)
 
-  defp cast_exposure(mode) when is_binary(mode),
-    do: cast_exposure(String.to_existing_atom(mode))
+  defp cast_exposure(mode) when is_binary(mode) do
+    mode
+    |> String.trim()
+    |> String.downcase()
+    |> then(fn value ->
+      Enum.find(@valid_exposure_modes, :normal, &(Atom.to_string(&1) == value))
+    end)
+  end
 
   defp cast_float(nil, default), do: default
   defp cast_float(v, _default) when is_float(v), do: v

@@ -51,6 +51,18 @@ defmodule NervesView.DVR.SegmentIndex do
   end
 
   @doc """
+  Returns the segment nearest to `target_ts`.
+
+  A segment containing the timestamp wins. Otherwise the closest segment
+  boundary wins, preferring the later segment on an exact tie.
+  """
+  @spec nearest_segment(String.t(), non_neg_integer()) :: map() | nil
+  def nearest_segment(camera_id, target_ts)
+      when is_binary(camera_id) and is_integer(target_ts) do
+    GenServer.call(@name, {:nearest_segment, camera_id, target_ts})
+  end
+
+  @doc """
   Returns groups of contiguous segments ("clips") for a camera. Two segments
   are contiguous if the gap between them is no more than ~2× a segment's
   duration; longer gaps split the recording into separate clips.
@@ -158,6 +170,15 @@ defmodule NervesView.DVR.SegmentIndex do
     {:reply, result, state}
   end
 
+  def handle_call({:nearest_segment, camera_id, target_ts}, _from, state) do
+    result =
+      state
+      |> Map.get(camera_id, [])
+      |> Enum.min_by(&segment_distance(&1, target_ts), fn -> nil end)
+
+    {:reply, result, state}
+  end
+
   def handle_call(:clear, _from, _state) do
     {:reply, :ok, %{}}
   end
@@ -243,6 +264,16 @@ defmodule NervesView.DVR.SegmentIndex do
     else
       idx = Enum.find_index(list, &(&1.started_at > segment.started_at)) || length(list)
       List.insert_at(list, idx, segment)
+    end
+  end
+
+  defp segment_distance(segment, target_ts) do
+    seg_end = segment.started_at + segment.duration
+
+    cond do
+      target_ts >= segment.started_at and target_ts < seg_end -> {0, 0}
+      target_ts < segment.started_at -> {segment.started_at - target_ts, 0}
+      true -> {target_ts - seg_end, 1}
     end
   end
 

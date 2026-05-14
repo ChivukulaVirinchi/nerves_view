@@ -115,4 +115,17 @@ defmodule NervesView.DVR.SegmentIndexTest do
     timestamps = Enum.map(segs, & &1.started_at)
     assert timestamps == [now, now + 6, now + 12]
   end
+
+  test "finds nearest segment around a timestamp gap" do
+    now = System.system_time(:second)
+
+    SegmentIndex.register("cam-1", now, %{duration: 6, size: 100})
+    SegmentIndex.register("cam-1", now + 60, %{duration: 6, size: 100})
+    Process.sleep(50)
+
+    assert %{started_at: ^now} = SegmentIndex.nearest_segment("cam-1", now + 10)
+    assert %{started_at: next} = SegmentIndex.nearest_segment("cam-1", now + 50)
+    assert next == now + 60
+    assert SegmentIndex.nearest_segment("missing", now) == nil
+  end
 end

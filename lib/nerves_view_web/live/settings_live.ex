@@ -92,6 +92,27 @@ defmodule NervesViewWeb.SettingsLive do
     end
   end
 
+  def handle_event("clear_recordings", params, socket) do
+    confirmed? =
+      params["confirm_delete"] == "true" and
+        String.trim(params["confirm_phrase"] || "") == "DELETE RECORDINGS"
+
+    if confirmed? do
+      case NervesView.clear_all_recordings() do
+        {:ok, %{files: files, bytes: bytes}} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Deleted #{files} recording files (#{format_bytes(bytes)}).")
+           |> assign(diagnostics: NervesView.camera_diagnostics())}
+
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Could not clear recordings: #{inspect(reason)}")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Confirm the checkbox and type DELETE RECORDINGS.")}
+    end
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -213,6 +234,30 @@ defmodule NervesViewWeb.SettingsLive do
               </div>
             </:content>
           </.card>
+
+          <.card class="mt-4 border-destructive/40">
+            <:header><h3 class="font-display font-semibold text-sm text-destructive">Danger Zone</h3></:header>
+            <:content>
+              <.form for={%{}} phx-submit="clear_recordings" class="grid gap-3">
+                <label class="flex items-start gap-2 text-sm">
+                  <input type="checkbox" name="confirm_delete" value="true" class="mt-1" />
+                  <span>Delete all recorded video and reset DVR indexes.</span>
+                </label>
+                <input
+                  type="text"
+                  name="confirm_phrase"
+                  class="input"
+                  placeholder="DELETE RECORDINGS"
+                  autocomplete="off"
+                />
+                <div>
+                  <.button type="submit" variant="destructive">
+                    Clear all recordings
+                  </.button>
+                </div>
+              </.form>
+            </:content>
+          </.card>
         </:panel>
 
         <%!-- ─ Diagnostics ─ --%>
@@ -272,4 +317,11 @@ defmodule NervesViewWeb.SettingsLive do
       otp_apps: length(Application.started_applications())
     }
   end
+
+  defp format_bytes(bytes) when is_integer(bytes) and bytes < 1024, do: "#{bytes} B"
+
+  defp format_bytes(bytes) when is_integer(bytes) and bytes < 1_048_576,
+    do: "#{Float.round(bytes / 1024, 1)} KB"
+
+  defp format_bytes(bytes) when is_integer(bytes), do: "#{Float.round(bytes / 1_048_576, 1)} MB"
 end

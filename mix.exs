@@ -29,8 +29,26 @@ defmodule NervesView.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       releases: [{@app, release()}],
-      preferred_cli_target: [run: :host, test: :host],
       aliases: aliases()
+    ]
+  end
+
+  def cli do
+    [
+      preferred_envs: [
+        firmware: :prod,
+        upload: :prod,
+        burn: :prod,
+        "firmware.burn": :prod
+      ],
+      preferred_targets: [
+        run: :host,
+        test: :host,
+        firmware: :rpi0_2,
+        upload: :rpi0_2,
+        burn: :rpi0_2,
+        "firmware.burn": :rpi0_2
+      ]
     ]
   end
 

@@ -260,11 +260,33 @@ defmodule NervesView do
     StorageManager.enforce_retention(opts)
   end
 
+  @spec clear_all_recordings() :: {:ok, map()} | {:error, term()}
+  def clear_all_recordings do
+    cameras = list_cameras()
+
+    Enum.each(cameras, fn camera ->
+      PipelineManager.stop_pipeline(camera.id)
+    end)
+
+    result = StorageManager.clear_recordings()
+
+    Enum.each(cameras, fn camera ->
+      start_camera_pipeline(camera.id)
+    end)
+
+    result
+  end
+
   # ── DVR ──
 
   @spec dvr_segments(String.t(), non_neg_integer(), non_neg_integer()) :: [map()]
   def dvr_segments(camera_id, from_ts, to_ts) do
     NervesView.DVR.SegmentIndex.segments_for(camera_id, from_ts, to_ts)
+  end
+
+  @spec dvr_nearest_segment(String.t(), non_neg_integer()) :: map() | nil
+  def dvr_nearest_segment(camera_id, target_ts) do
+    NervesView.DVR.SegmentIndex.nearest_segment(camera_id, target_ts)
   end
 
   @spec dvr_retention_window(String.t()) :: {non_neg_integer(), non_neg_integer()} | nil
